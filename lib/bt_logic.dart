@@ -1,5 +1,5 @@
 import 'package:flutter_blue/flutter_blue.dart';
-import 'package:flutter_blue/gen/flutterblue.pbjson.dart';
+import 'package:srp/client.dart';
 
 final FlutterBlue fb = FlutterBlue.instance;
 
@@ -46,16 +46,18 @@ Future<bool> connectToDevice(BluetoothDevice btd) async {
   return true; // success
 }
 
-Future<List<BluetoothCharacteristic>> discoverCharacteristics(
+Future<List<BluetoothService>> discoverCharacteristics(
     BluetoothDevice btd) async {
   List<BluetoothCharacteristic> btcs = [];
-  final services = await btd.discoverServices();
+  // final services = await btd.discoverServices();
 
-  for (final service in services) {
-    btcs.addAll(service.characteristics);
-  }
+  // for (final service in services) {
+  //   btcs.addAll(service.characteristics);
+  // }
 
-  return btcs;
+  // return btcs;
+
+  return await btd.discoverServices();
 }
 
 String getFirstProperty(BluetoothCharacteristic c) {
@@ -67,16 +69,31 @@ String getFirstProperty(BluetoothCharacteristic c) {
   else return 'n/a';
 }
 
-// enum Property {
-//   READ,
-//   WRITE,
-//   NOTIFY,
-//   INDICATE
+// /// converts an input string to a list of ints.
+// /// 
+// /// input is a hexadecimal string, ex. '7e00022a01d1'
+// /// output is a list of ints (base 10), ranging from 00-ff,
+// ///   ie. the input is parsed 2 characters at a time
+// List<int> stringToIntList(String input) {
+//   // check that the input string is of even length (we want pairs)
+//   if (input.length % 2 != 0) {
+//     print('incorrect usage: given string is not of even length');
+//     return null;
+//   }
+
+//   List<int> output = [];
+//   for (int i=0; i <= input.length - 2; i+=2) {
+//     final s = input.substring(i,i+2);
+//     output.add(int.parse(s, radix: 16));
+//   }
+
+//   return output;
 // }
 
-// Map<Property, String> propertyMap = {
-//   Property.READ: 'read',
-//   Property.WRITE: 'write',
-//   Property.NOTIFY: 'notify',
-//   Property.INDICATE: 'indicate',
-// };
+// String intListToHexString(List<int> input) {
+//   var output = '';
+//   input.forEach((hex) {output += hex.toRadixString(16).padLeft(2,'0');});
+//   return output;
+// }
+
+void test() {}

@@ -1,13 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
+import 'package:convert/convert.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue/flutter_blue.dart';
 import 'bt_logic.dart' as bt;
+import 'xbee_auth.dart';
 
 void main() {
   runApp(MyApp());
 }
+
+final exampleHexString =
+    '7e00822c010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001d1';
 
 class MyApp extends StatelessWidget {
   // This widget is the root of your application.
@@ -38,18 +42,24 @@ class _MyHomePageState extends State<MyHomePage> {
   BluetoothDevice selectedDevice;
   bool scanInProgress = false;
 
-  List<BluetoothCharacteristic> discoveredChars = [];
-  BluetoothCharacteristic selectedChar;
+  List<BluetoothService> discoveredServices = [];
+  BluetoothService selectedService;
 
   StreamSubscription sub;
-  List<String> incomingData = ['data displayed here...'];
+  List<int> latestResponse;
+  List<String> incomingData = ['notification / indication values go here...'];
+  BluetoothCharacteristic writeTarget;
 
   TextEditingController writeTC = TextEditingController();
   ScrollController sc = ScrollController();
 
+  XBeeAuth xba;
+
   @override
   void initState() {
     super.initState();
+    xba = XBeeAuth();
+    xba.step0('Fathom');
   }
 
   @override
@@ -68,14 +78,15 @@ class _MyHomePageState extends State<MyHomePage> {
                 headingText('Devices', 16),
                 scannedDevicesRow(),
                 SizedBox(height: 10),
-                headingText('Characteristics', 16),
-                charsDropdown(),
+                headingText('Services', 16),
+                servicesDropdown(),
                 SizedBox(height: 30),
                 headingText('Incoming Data', 16),
                 readSection(),
                 SizedBox(height: 30),
                 headingText('Send Data', 16),
-                writeSection(),
+                // writeSection(),
+                sendRequestSection(),
               ],
             ),
           )),
@@ -122,13 +133,13 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget charsDropdown() {
+  Widget servicesDropdown() {
     return DropdownButton(
       isExpanded: true,
-      value: selectedChar,
+      value: selectedService,
       items: discCharsAsDropdown(),
-      hint: Text('discovered characteristics'),
-      onChanged: selectChar,
+      hint: Text('discovered services'),
+      onChanged: selectServ,
     );
   }
 
@@ -142,13 +153,12 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  List<DropdownMenuItem<BluetoothCharacteristic>> discCharsAsDropdown() {
+  List<DropdownMenuItem<BluetoothService>> discCharsAsDropdown() {
     return List.generate(
-      discoveredChars.length,
+      discoveredServices.length,
       (i) => DropdownMenuItem(
-        child: Text(
-            'service ${discoveredChars[i].serviceUuid.toString().substring(0, 8)} :: ${bt.getFirstProperty(discoveredChars[i])}'),
-        value: discoveredChars[i],
+        child: Text('service ${discoveredServices[i].uuid}'),
+        value: discoveredServices[i],
       ),
     );
   }
@@ -166,7 +176,10 @@ class _MyHomePageState extends State<MyHomePage> {
         controller: sc,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: incomingData.map((item) => Container(child:Text(item), padding: EdgeInsets.only(top: 5))).toList(),
+          children: incomingData
+              .map((item) => Container(
+                  child: Text(item), padding: EdgeInsets.only(top: 5)))
+              .toList(),
         ),
       ),
     );
@@ -177,13 +190,78 @@ class _MyHomePageState extends State<MyHomePage> {
       direction: Axis.horizontal,
       children: [
         Expanded(
-            child: TextField(
-          controller: writeTC,
-        )),
+          child: TextField(
+            controller: writeTC,
+            decoration: InputDecoration(
+              hintText: (writeTarget == null)
+                  ? "no write characteristic found"
+                  : writeTarget.uuid.toString(),
+            ),
+          ),
+        ),
         SizedBox(width: 10),
-        ElevatedButton(child: Icon(Icons.send)),
+        ElevatedButton(
+          child: Icon(Icons.send),
+          // onPressed: sendToWriteTarget,
+        ),
       ],
     );
+  }
+
+  Widget sendRequestSection() {
+    return Flex(
+      direction: Axis.horizontal,
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        ElevatedButton(
+          child: Text('S1'),
+          onPressed: sendStep1,
+        ),
+        ElevatedButton(
+          child: Text('S2'),
+          onPressed: processStep2,
+        ),
+        ElevatedButton(
+          child: Text('S3'),
+          onPressed: sendStep3,
+        ),
+        ElevatedButton(
+          child: Text('S4'),
+          onPressed: processStep4,
+        ),
+      ],
+    );
+  }
+
+  void sendStep1() {
+    final send = xba.step1();
+    sendToWriteTarget(send);
+  }
+
+  void processStep2() {
+    if (latestResponse == null) return;
+
+    xba.step2(latestResponse);
+    print('client salt is: ${xba.salt}');
+    print('set server salt: ${xba.serverSalt}');
+    print('set server B: ${xba.B}');
+  }
+
+  void sendStep3() {
+    final send = xba.step3();
+    sendToWriteTarget(send);
+  }
+
+  void processStep4() {
+    if (latestResponse == null) return;
+
+    xba.step4(latestResponse);
+  }
+
+
+  void sendToWriteTarget(List<int> send) {
+    logData('writing $send to the characteristic');
+    writeTarget.write(send);
   }
 
   void selectDevice(BluetoothDevice btd) {
@@ -203,7 +281,21 @@ class _MyHomePageState extends State<MyHomePage> {
         return;
       } else {
         // discover services then characteristics
-        discoveredChars = await bt.discoverCharacteristics(selectedDevice);
+        discoveredServices = await bt.discoverCharacteristics(selectedDevice);
+
+        // request max MTU
+        try {
+          logData('requesting mtu of 512...');
+          selectedDevice.requestMtu(512).then((_) async {
+            await Future.delayed(Duration(seconds: 1));
+            sub = selectedDevice.mtu.listen((newmtu) {
+              print('current mtu: $newmtu');
+              logData('new mtu: ${newmtu.toString()}');
+            });
+          });
+        } catch (e) {
+          print('error during mtu request$e');
+        }
 
         // re-render
         setState(() {});
@@ -211,13 +303,12 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  void selectChar(BluetoothCharacteristic btc) {
-
+  void selectServ(BluetoothService bts) {
     setState(() {
-      selectedChar = btc;
+      selectedService = bts;
     });
 
-    handleSelectedChar();
+    handleSelectedServ();
   }
 
   void scanForDevices() async {
@@ -236,47 +327,72 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  void handleSelectedChar() async {
-
+  void handleSelectedServ() async {
     sub?.cancel();
     // selectedChar?.setNotifyValue(false);
 
-    if (selectedChar.properties.read) {
-      final readData = await selectedChar.read();
-      logData('read value: ${Utf8Decoder().convert(readData)}');
-    } else if (selectedChar.properties.write) {
+    // if (selectedService.properties.read) {
+    //   final readData = await selectedService.read();
+    //   logData('read value: ${Utf8Decoder().convert(readData)}');
+    // } else if (selectedService.properties.write) {
 
-    } else if (selectedChar.properties.notify) {
-      logData('subscribing to notify...');
-      sub = selectedChar.value.listen((val) {
-        logData('notify value: ${Utf8Decoder().convert(val)}');
-      });
-      selectedChar.setNotifyValue(true);
-    } else if (selectedChar.properties.indicate) {
+    // } else if (selectedService.properties.notify) {
+    //   logData('subscribing to notify...');
+    //   sub = selectedService.value.listen((val) {
+    //     logData('notify value: ${Utf8Decoder().convert(val)}');
+    //   }, cancelOnError: true,);
+    //   selectedService.setNotifyValue(true);
+    // } else if (selectedService.properties.indicate) {
+    // }
 
-    }
+    // loop through characteristics of this service, assign interactivity
+    var alreadySubbedToSomething = false;
+    selectedService.characteristics.forEach((char) {
+      if (char.properties.notify || char.properties.indicate) {
+        logData(
+            'subscribing to notifications / indications for only ${char.uuid}');
+        if (!alreadySubbedToSomething) {
+          sub = char.value.listen(
+            (val) {
+              print(val);
+              latestResponse = val;
+              logData('‼️ new value in hex ${hex.encode(val)}');
+            },
+            cancelOnError: true,
+          );
+          char.setNotifyValue(true);
+        }
+      }
+
+      if (char.properties.write) {
+        logData('writes will go to ${char.uuid}');
+        writeTarget = char;
+      }
+    });
   }
 
   void logData(String item) {
     setState(() {
       incomingData.add('${getNowTime()} - $item');
       // scroll to the bottom
-      sc.animateTo(sc.position.maxScrollExtent, duration: Duration(milliseconds: 200), curve: Curves.easeInOut);
+      sc.animateTo(sc.position.maxScrollExtent,
+          duration: Duration(milliseconds: 200), curve: Curves.easeInOut);
       // BUG: this animation happens before rebuild
       // ie. scrolls 1 item from the bottom, not all the way to the bottom.
     });
   }
 
   String getNowTime() {
-    return '${DateTime.now().hour.toString().padLeft(2,'0')}:${DateTime.now().minute.toString().padLeft(2,'0')}:${DateTime.now().second.toString().padLeft(2,'0')}';
+    return '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}';
   }
 
   void resetState() {
     logData('re-scanning...');
     setState(() {
       sub?.cancel();
-      selectedChar = null;
-      discoveredChars.clear();
+      writeTarget = null;
+      selectedService = null;
+      discoveredServices.clear();
       selectedDevice = null;
       scannedDevices.clear();
       scannedDevicesDDItems.clear();
