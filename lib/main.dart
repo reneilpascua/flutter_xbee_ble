@@ -58,8 +58,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    xba = XBeeAuth();
-    xba.step0('Fathom');
+    xba = XBeeAuth(password: 'Fathom');
   }
 
   @override
@@ -234,33 +233,35 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void sendStep1() {
+    logData('step 1: client presents A to server');
     final send = xba.step1();
     sendToWriteTarget(send);
   }
 
   void processStep2() {
+    logData('step 2: server presents salt and B to client');
     if (latestResponse == null) return;
 
     xba.step2(latestResponse);
     print('client salt is: ${xba.salt}');
-    print('set server salt: ${xba.serverSalt}');
     print('set server B: ${xba.B}');
   }
 
   void sendStep3() {
+    logData('step 3: client sends proof M1 to server');
     final send = xba.step3();
     sendToWriteTarget(send);
   }
 
   void processStep4() {
+    logData('step 4: server sends M2 and nonces to client');
     if (latestResponse == null) return;
 
     xba.step4(latestResponse);
   }
 
-
   void sendToWriteTarget(List<int> send) {
-    logData('writing $send to the characteristic');
+    logData('writing ${hex.encode(send)}');
     writeTarget.write(send);
   }
 
@@ -370,7 +371,7 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     });
   }
-
+// 87c19f525c2f9a94e20994bc51c8da1ec1ae3a14fa5030cdb46845568286d933
   void logData(String item) {
     setState(() {
       incomingData.add('${getNowTime()} - $item');

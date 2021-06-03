@@ -9,23 +9,17 @@ import 'package:convert/convert.dart';
 class XBeeAuth {
   String password; // plaintext
   String salt; // hex string
-  String serverSalt; // hex string
   String privateKey; // hex string
   String A; // hex string
   String B; // hex string
   Ephemeral eph;
   Session sesh;
   String serverM2; // hex string
+  String txNonce; // hex string
+  String rxNonce; // hex string
 
-  /// The step the unlock process is currently at.
-
-  /// Starts the unlock process by preparing keys given the password.
-  void step0(String password) {
-    // salt = generateSalt();
-    salt='54b7ee56';
-    privateKey = derivePrivateKey(salt, I, password);
-  }
-
+  XBeeAuth({this.password});
+  
   /// Generate 'A' value, an ephemeral public key
   ///
   /// Send the returned value to the XBee Server.
@@ -62,7 +56,7 @@ class XBeeAuth {
 
     // all good
     final serverSaltInts = response.sublist(5, 9);
-    serverSalt = hex.encode(serverSaltInts);
+    salt = hex.encode(serverSaltInts);
     final serverPubInts = response.sublist(9, response.length - 1);
     B = hex.encode(serverPubInts);
   }
@@ -71,11 +65,13 @@ class XBeeAuth {
   ///
   /// Send the returned value to the XBee Server.
   List<int> step3() {
+
+    privateKey = derivePrivateKey(salt, I, password);
     
     sesh = deriveSession(
       eph.secret,
       B,
-      serverSalt, // my salt, or the salt the server sent?
+      salt,
       I,
       privateKey,
     );
@@ -96,7 +92,12 @@ class XBeeAuth {
           'Error in step 2: 0x${response[4].toRadixString(16)}');
     }
 
+    serverM2 = hex.encode(response.sublist(5,37));
+    verifySession(eph.public, sesh, serverM2);
 
+    txNonce = hex.encode(response.sublist(37,49));
+    rxNonce = hex.encode(response.sublist(49,response.length-1));
+    print('session key is ${sesh.key}');
   }
 
   /// Calculates the checksum.
