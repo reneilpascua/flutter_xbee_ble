@@ -413,7 +413,7 @@ class _MyHomePageState extends State<MyHomePage> {
   String decryptAES(String encryptedHexString) {
     print('encrypted hex input: $encryptedHexString');
 
-    final ivhex = '${xba.rxNonce}00000009';
+    final ivhex = '${xba.rxNonce}00000001';
     final ivee = x.IV.fromBase16(ivhex);
     print('using this iv: ${ivee.base16}');
 
