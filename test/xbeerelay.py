@@ -1,16 +1,21 @@
-def padRelayData(data):
-    '''
-    Pads the data with null characters so the relayed message is a multiple of 16B.
+"""
+meant to be copied and pasted into a micropython repl
 
-    The message has an overhead of 6B, so the output must be of length 10, 26, 42, ...
-    @param data - plaintext string to be relayed
-    '''
-    while(len(data) % 16 != 0):
-        data += '\0'
+the weird indentation is because micropython tries to be helpful with auto indenting.
+"""
+def padRelayData(data):
+while((len(data)+6) % 16 != 0):
+data += '\0'
+
+
     return data
 
+
+
+
+
 def relayData(data):
-    '''
-    Relays the given plaintext data via BLE, with proper padding.
-    '''
-    relay.send(relay.BLUETOOTH, padRelayData(data))
+relay.send(relay.BLUETOOTH, padRelayData(data))
+
+
+

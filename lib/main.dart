@@ -444,7 +444,7 @@ class _MyHomePageState extends State<MyHomePage> {
     ivCounter += incr;
 
     // convert to padded hex
-    ivCounterHex = ivCounter.toRadixString(16).padLeft(16,'0');
+    ivCounterHex = ivCounter.toRadixString(16).padLeft(8,'0');
   }
 
   void resetState() {
