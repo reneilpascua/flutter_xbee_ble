@@ -57,6 +57,8 @@ class _MyHomePageState extends State<MyHomePage> {
   XBeeAuth xba;
   bool unlocked = false;
   x.Encrypter encrypter;
+  int ivCounter = 1;
+  String ivCounterHex = '00000001';
 
   @override
   void initState() {
@@ -298,6 +300,11 @@ class _MyHomePageState extends State<MyHomePage> {
       padding: null,
     );
     encrypter = x.Encrypter(aes);
+
+    final aes2 = x.AES(
+      x.Key.fromBase16(xba.sesh.key),
+      mode: x.AESMode.sic,
+    );
   }
 
   void sendToWriteTarget(List<int> send) {
@@ -413,7 +420,7 @@ class _MyHomePageState extends State<MyHomePage> {
   String decryptAES(String encryptedHexString) {
     print('encrypted hex input: $encryptedHexString');
 
-    final ivhex = '${xba.rxNonce}00000001';
+    final ivhex = '${xba.rxNonce}$ivCounterHex';
     final ivee = x.IV.fromBase16(ivhex);
     print('using this iv: ${ivee.base16}');
 
@@ -428,7 +435,16 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     }
 
+    incrCounter(decrypted16.length);
     return decrypted16.substring(5,decrypted16.length-1);
+  }
+
+  void incrCounter(int magnitude) {
+    final incr = magnitude ~/ 16;
+    ivCounter += incr;
+
+    // convert to padded hex
+    ivCounterHex = ivCounter.toRadixString(16).padLeft(16,'0');
   }
 
   void resetState() {
