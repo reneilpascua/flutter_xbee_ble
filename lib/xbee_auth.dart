@@ -1,6 +1,7 @@
 import 'package:srp/client.dart';
 import 'package:srp/types.dart';
 import 'package:convert/convert.dart';
+import 'package:encrypt/encrypt.dart';
 
 /// An encapsulation of the unlock process for XBee.
 ///
@@ -18,8 +19,10 @@ class XBeeAuth {
   String txNonce; // hex string
   String rxNonce; // hex string
 
-  XBeeAuth({this.password});
-  
+  XBeeAuth(String password) {
+    this.password = password;
+  }
+
   /// Generate 'A' value, an ephemeral public key
   ///
   /// Send the returned value to the XBee Server.
@@ -40,19 +43,7 @@ class XBeeAuth {
   ///
   /// After invoking this method, the client will be prepared for step 3.
   void step2(List<int> response) {
-    // check if the step frame is correct
-    if (response[4] != 2) {
-      throw Exception(ERRORS_IN_STEP_FRAME[response[4]] ??
-          'Error in step 2: 0x${response[4].toRadixString(16)}');
-    }
-
-    // checksum
-    final responseChecksum = response[response.length - 1].toRadixString(16);
-    final calculatedChecksum = calculateXBeeChecksum(
-        hex.encode(response.sublist(3, response.length - 1)));
-    assertChecksum(
-        received: responseChecksum,
-        calculated: calculatedChecksum); // throws exception
+    verifyResponse(response, 2);
 
     // all good
     final serverSaltInts = response.sublist(5, 9);
@@ -85,12 +76,12 @@ class XBeeAuth {
     return hex.decode(step3String);
   }
 
+  /// Processes the server response to step 3.
+  /// 
+  /// Will verify the server's proof; if successful, the nonces are
+  /// recorded and communication is unlocked.
   void step4(List<int> response) {
-    // check if the step frame is correct
-    if (response[4] != 4) {
-      throw Exception(ERRORS_IN_STEP_FRAME[response[4]] ??
-          'Error in step 2: 0x${response[4].toRadixString(16)}');
-    }
+    verifyResponse(response, 4);
 
     serverM2 = hex.encode(response.sublist(5,37));
     verifySession(eph.public, sesh, serverM2);
@@ -114,11 +105,24 @@ class XBeeAuth {
     return checksumInt.toRadixString(16);
   }
 
-  void assertChecksum({String received, String calculated}) {
-    if (received != calculated) {
-      throw Exception(
-          'The received checksum $received did not match the calculated checksum $calculated');
+  /// Verifies the response of the XBee.
+  /// 
+  /// If there are any problems, an exception will be thrown.
+  void verifyResponse(List<int> response, int expectedStep) {
+    // check if the step frame is correct
+    if (response[4] != expectedStep) {
+      throw Exception(ERRORS_IN_STEP_FRAME[response[4]] ??
+          'Error in step $expectedStep: 0x${response[4].toRadixString(16)}');
     }
+
+    // checksum
+    final responseChecksum = response[response.length - 1].toRadixString(16);
+    final calculatedChecksum = calculateXBeeChecksum(
+        hex.encode(response.sublist(3, response.length - 1)));
+    if (responseChecksum != calculatedChecksum) {
+      throw Exception(
+          'The received checksum $responseChecksum did not match the calculated checksum $calculatedChecksum');
+    } // throws exception
   }
 
   int listSum(List<int> ints) {
@@ -152,7 +156,36 @@ const ERRORS_IN_STEP_FRAME = {
 const STEP1_LENGTH = '0082'; // 130 in base 10 (unit: Bytes)
 const STEP3_LENGTH = '0022'; // 34 in base 10 (unit: Bytes)
 
-void main() {
-  print('testing checksum');
+void main0() {
+  final plainText = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit';
+  final key = Key.fromUtf8('my 32 length key................');
+  final iv = IV.fromLength(16);
 
+  final encrypter = Encrypter(AES(key));
+
+  final encrypted = encrypter.encrypt(plainText, iv: iv);
+  final decrypted = encrypter.decrypt(encrypted, iv: iv);
+  final decrypted2 = encrypter.decrypt(encrypted, iv: iv);
+
+
+  print(decrypted); // Lorem ipsum dolor sit amet, consectetur adipiscing elit
+  print(decrypted2);
+  print(encrypted.base64); // R4PxiU3h8YoIRqVowBXm36ZcCeNeZ4s1OvVBTfFlZRdmohQqOpPQqD1YecJeZMAop/hZ4OxqgC1WtwvX/hP9mw==
+}
+
+void main1() {
+  final plainText = 'helloworld';
+  final key = Key.fromUtf8('my 32 length key................');
+  var iv = IV.fromBase16('0001');
+
+  final encrypter = Encrypter(AES(key));
+
+  final encrypted = encrypter.encrypt(plainText, iv: iv);
+  print(encrypted.base16);
+
+  final decrypted = encrypter.decrypt(encrypted, iv: iv);
+  print(decrypted);
+
+  final decrypted2 = encrypter.decrypt(encrypted, iv: IV.fromBase16('000b'));
+  print(decrypted2);
 }

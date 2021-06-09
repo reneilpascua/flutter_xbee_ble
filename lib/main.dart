@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:convert/convert.dart';
+import 'package:encrypt/encrypt.dart' as x;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue/flutter_blue.dart';
@@ -54,11 +55,16 @@ class _MyHomePageState extends State<MyHomePage> {
   ScrollController sc = ScrollController();
 
   XBeeAuth xba;
+  bool unlocked = false;
+  x.Encrypter encrypter;
 
   @override
   void initState() {
     super.initState();
-    xba = XBeeAuth(password: 'Fathom');
+    print('init state..?');
+    xba = XBeeAuth('Fathom');
+    print(xba.password);
+    print('init state finished');
   }
 
   @override
@@ -80,12 +86,14 @@ class _MyHomePageState extends State<MyHomePage> {
                 headingText('Services', 16),
                 servicesDropdown(),
                 SizedBox(height: 30),
-                headingText('Incoming Data', 16),
+                headingText('Console', 16),
                 readSection(),
                 SizedBox(height: 30),
-                headingText('Send Data', 16),
+                headingText('XBee Unlock', 16),
                 // writeSection(),
                 sendRequestSection(),
+                Text('session key: ${xba?.sesh?.key}'),
+                Text('response nonce: ${xba?.rxNonce}'),
               ],
             ),
           )),
@@ -210,26 +218,44 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget sendRequestSection() {
     return Flex(
       direction: Axis.horizontal,
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      mainAxisAlignment: MainAxisAlignment.start,
       children: [
-        ElevatedButton(
-          child: Text('S1'),
-          onPressed: sendStep1,
-        ),
-        ElevatedButton(
-          child: Text('S2'),
-          onPressed: processStep2,
-        ),
-        ElevatedButton(
-          child: Text('S3'),
-          onPressed: sendStep3,
-        ),
-        ElevatedButton(
-          child: Text('S4'),
-          onPressed: processStep4,
-        ),
+        Expanded(
+            child: ElevatedButton(
+          onPressed: () {
+            try {
+              xbeeUnlock().then((e) {
+                print('unlock process finished');
+              });
+            } catch (e) {
+              logData('Something went wrong: $e');
+            }
+          },
+          child: Icon(Icons.lock_open),
+        )),
       ],
     );
+  }
+
+  Future<void> xbeeUnlock() async {
+    // step 1: send A to server
+    try {
+      sendStep1();
+    } on FormatException {
+      logData('Odd ephemeral generated. Please try again');
+    }
+
+    // step 2: server presents salt and B (need to wait)
+    await Future.delayed(Duration(seconds: 1));
+    processStep2();
+
+    // step 3:  client sends proof M1 to server
+    sendStep3();
+
+    // step 4: server sends M2 and nonces to client.
+    // client must verify session
+    await Future.delayed(Duration(seconds: 1));
+    processStep4();
   }
 
   void sendStep1() {
@@ -257,7 +283,21 @@ class _MyHomePageState extends State<MyHomePage> {
     logData('step 4: server sends M2 and nonces to client');
     if (latestResponse == null) return;
 
-    xba.step4(latestResponse);
+    try {
+      xba.step4(latestResponse);
+      unlocked = true;
+    } catch (e) {
+      print('Error in verifying session: $e');
+      return;
+    }
+
+    // create the aes algo and encrypter
+    final aes = x.AES(
+      x.Key.fromBase16(xba.sesh.key),
+      mode: x.AESMode.ctr,
+      padding: null,
+    );
+    encrypter = x.Encrypter(aes);
   }
 
   void sendToWriteTarget(List<int> send) {
@@ -330,23 +370,6 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void handleSelectedServ() async {
     sub?.cancel();
-    // selectedChar?.setNotifyValue(false);
-
-    // if (selectedService.properties.read) {
-    //   final readData = await selectedService.read();
-    //   logData('read value: ${Utf8Decoder().convert(readData)}');
-    // } else if (selectedService.properties.write) {
-
-    // } else if (selectedService.properties.notify) {
-    //   logData('subscribing to notify...');
-    //   sub = selectedService.value.listen((val) {
-    //     logData('notify value: ${Utf8Decoder().convert(val)}');
-    //   }, cancelOnError: true,);
-    //   selectedService.setNotifyValue(true);
-    // } else if (selectedService.properties.indicate) {
-    // }
-
-    // loop through characteristics of this service, assign interactivity
     var alreadySubbedToSomething = false;
     selectedService.characteristics.forEach((char) {
       if (char.properties.notify || char.properties.indicate) {
@@ -357,7 +380,9 @@ class _MyHomePageState extends State<MyHomePage> {
             (val) {
               print(val);
               latestResponse = val;
-              logData('‼️ new value in hex ${hex.encode(val)}');
+              String toPrint = hex.encode(val);
+              if (unlocked) toPrint = decryptAES(toPrint);
+              logData('new value: $toPrint');
             },
             cancelOnError: true,
           );
@@ -371,20 +396,39 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     });
   }
-// 87c19f525c2f9a94e20994bc51c8da1ec1ae3a14fa5030cdb46845568286d933
+
   void logData(String item) {
+    if (incomingData.length >= 25) {
+      incomingData.removeLast();
+    }
     setState(() {
-      incomingData.add('${getNowTime()} - $item');
-      // scroll to the bottom
-      sc.animateTo(sc.position.maxScrollExtent,
-          duration: Duration(milliseconds: 200), curve: Curves.easeInOut);
-      // BUG: this animation happens before rebuild
-      // ie. scrolls 1 item from the bottom, not all the way to the bottom.
+      incomingData.insert(0, '${getNowTime()} - $item');
     });
   }
 
   String getNowTime() {
     return '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}';
+  }
+
+  String decryptAES(String encryptedHexString) {
+    print('encrypted hex input: $encryptedHexString');
+
+    final ivhex = '${xba.rxNonce}00000009';
+    final ivee = x.IV.fromBase16(ivhex);
+    print('using this iv: ${ivee.base16}');
+
+    final decrypted16 = encrypter.decrypt16(encryptedHexString, iv: ivee);
+    print('decrypted16: $decrypted16');
+    print('length of decrypted: ${decrypted16.length}');
+    for (int i = 0; i < decrypted16.length; i++) {
+      try {
+        print(decrypted16.codeUnitAt(i));
+      } catch (e) {
+        print('exception at index $i: $e');
+      }
+    }
+
+    return decrypted16.substring(5,decrypted16.length-1);
   }
 
   void resetState() {
