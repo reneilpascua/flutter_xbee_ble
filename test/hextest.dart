@@ -1,6 +1,14 @@
+
+import 'package:convert/convert.dart';
 main() {
-  final codeunits = [126, 0, 19, 65533, 2, 104, 101, 108, 108, 108, 111, 32, 119, 111, 114, 108, 100, 33, 33, 33, 33, 33, 33, 46];
-  codeunits.forEach((element) {});
+  final hi = hex.decode('7e0f0f0f');
+  print(hi);
+  pad(hi);
+  print(hi);
+}
+
+void pad(List<int> arr) {
+  arr = [0,0,...arr, 0, 0];
 }
 
 List<int> stringToIntList(String input) {

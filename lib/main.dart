@@ -11,9 +11,6 @@ void main() {
   runApp(MyApp());
 }
 
-final exampleHexString =
-    '7e00822c010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001d1';
-
 class MyApp extends StatelessWidget {
   // This widget is the root of your application.
   @override
@@ -48,7 +45,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   StreamSubscription sub;
   List<int> latestResponse;
-  List<String> incomingData = ['notification / indication values go here...'];
+  List<String> incomingData = ['ℹ️ - notification / indication values go here...'];
   BluetoothCharacteristic writeTarget;
 
   TextEditingController writeTC = TextEditingController();
@@ -60,13 +57,12 @@ class _MyHomePageState extends State<MyHomePage> {
   int ivCounter = 1;
   String ivCounterHex = '00000001';
 
+
+
   @override
   void initState() {
     super.initState();
-    print('init state..?');
     xba = XBeeAuth('Fathom');
-    print(xba.password);
-    print('init state finished');
   }
 
   @override
@@ -91,11 +87,10 @@ class _MyHomePageState extends State<MyHomePage> {
                 headingText('Console', 16),
                 readSection(),
                 SizedBox(height: 30),
-                headingText('XBee Unlock', 16),
-                // writeSection(),
-                sendRequestSection(),
-                Text('session key: ${xba?.sesh?.key}'),
-                Text('response nonce: ${xba?.rxNonce}'),
+                headingText('Send Payload', 16),
+                // headingText('XBee Unlock', 16),
+                // sendRequestSection(),
+                writeSection(),
               ],
             ),
           )),
@@ -119,6 +114,19 @@ class _MyHomePageState extends State<MyHomePage> {
         scannedDevicesDropdown(),
         SizedBox(width: 10),
         scanBtn(),
+        SizedBox(width:5),
+        ElevatedButton(
+          onPressed: () {
+            try {
+              xbeeUnlock().then((e) {
+                logData('unlock process finished');
+              });
+            } catch (e) {
+              logData('error in unlock process: $e',prefix:'error');
+            }
+          },
+          child: Icon(Icons.lock_open),
+        )
       ],
     );
   }
@@ -129,7 +137,7 @@ class _MyHomePageState extends State<MyHomePage> {
         isExpanded: true,
         items: scannedDevicesAsDropdown(),
         value: selectedDevice,
-        hint: Text('press scan button to find devices'),
+        hint: Text('scan to find devices'),
         onChanged: selectDevice,
       ),
     );
@@ -176,7 +184,7 @@ class _MyHomePageState extends State<MyHomePage> {
     return Container(
       margin: EdgeInsets.only(top: 10),
       padding: EdgeInsets.all(5),
-      constraints: BoxConstraints.expand(height: 200),
+      constraints: BoxConstraints.expand(height: 300),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.grey, width: 2),
@@ -217,34 +225,12 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget sendRequestSection() {
-    return Flex(
-      direction: Axis.horizontal,
-      mainAxisAlignment: MainAxisAlignment.start,
-      children: [
-        Expanded(
-            child: ElevatedButton(
-          onPressed: () {
-            try {
-              xbeeUnlock().then((e) {
-                print('unlock process finished');
-              });
-            } catch (e) {
-              logData('Something went wrong: $e');
-            }
-          },
-          child: Icon(Icons.lock_open),
-        )),
-      ],
-    );
-  }
-
   Future<void> xbeeUnlock() async {
     // step 1: send A to server
     try {
       sendStep1();
     } on FormatException {
-      logData('Odd ephemeral generated. Please try again');
+      logData('odd ephemeral generated. please try again',prefix:'error');
     }
 
     // step 2: server presents salt and B (need to wait)
@@ -271,8 +257,6 @@ class _MyHomePageState extends State<MyHomePage> {
     if (latestResponse == null) return;
 
     xba.step2(latestResponse);
-    print('client salt is: ${xba.salt}');
-    print('set server B: ${xba.B}');
   }
 
   void sendStep3() {
@@ -289,7 +273,7 @@ class _MyHomePageState extends State<MyHomePage> {
       xba.step4(latestResponse);
       unlocked = true;
     } catch (e) {
-      print('Error in verifying session: $e');
+      logData('error in verifying session $e', prefix: 'error');
       return;
     }
 
@@ -308,8 +292,17 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void sendToWriteTarget(List<int> send) {
-    logData('writing ${hex.encode(send)}');
+    logData(send.toString(), prefix:'out');
     writeTarget.write(send);
+  }
+
+  void sendEncrypted() {
+    try {
+      final decoded = hex.decode(writeTC.text);
+      
+    } on FormatException {
+      logData('written command must be in hex',prefix: 'error');
+    }
   }
 
   void selectDevice(BluetoothDevice btd) {
@@ -324,8 +317,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void connectAndDiscover() async {
     bt.connectToDevice(selectedDevice).then((success) async {
       if (!success) {
-        // TODO: toast
-        print('unsuccessful connection');
+        logData('unsuccessful connection', prefix: 'error');
         return;
       } else {
         // discover services then characteristics
@@ -337,12 +329,11 @@ class _MyHomePageState extends State<MyHomePage> {
           selectedDevice.requestMtu(512).then((_) async {
             await Future.delayed(Duration(seconds: 1));
             sub = selectedDevice.mtu.listen((newmtu) {
-              print('current mtu: $newmtu');
               logData('new mtu: ${newmtu.toString()}');
             });
           });
         } catch (e) {
-          print('error during mtu request$e');
+          logData('error during mtu request: $e', prefix: 'error');
         }
 
         // re-render
@@ -385,11 +376,12 @@ class _MyHomePageState extends State<MyHomePage> {
         if (!alreadySubbedToSomething) {
           sub = char.value.listen(
             (val) {
-              print(val);
               latestResponse = val;
-              String toPrint = hex.encode(val);
-              if (unlocked) toPrint = decryptAES(toPrint);
-              logData('new value: $toPrint');
+              logData('raw: $val',prefix:'in');
+
+              if (unlocked) {
+                logData(decryptAES(hex.encode(val)),prefix:'in');
+              }
             },
             cancelOnError: true,
           );
@@ -404,12 +396,22 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  void logData(String item) {
+  static const LOG_EMOJIS = {
+    'in': '📲',
+    'out': '🔜',
+    'error': '❌',
+    'info': 'ℹ️'
+  };
+  void logData(String item, {String prefix}) {
     if (incomingData.length >= 25) {
       incomingData.removeLast();
     }
+    final pre = prefix ?? 'info';
+    final msg = '${LOG_EMOJIS[pre]} - $item';
+    
+    print(msg);
     setState(() {
-      incomingData.insert(0, '${getNowTime()} - $item');
+      incomingData.insert(0, '${getNowTime()} - $msg');
     });
   }
 
@@ -418,22 +420,14 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   String decryptAES(String encryptedHexString) {
-    print('encrypted hex input: $encryptedHexString');
+    print('input: $encryptedHexString');
 
     final ivhex = '${xba.rxNonce}$ivCounterHex';
     final ivee = x.IV.fromBase16(ivhex);
-    print('using this iv: ${ivee.base16}');
+    print('iv: ${ivee.base16}');
 
     final decrypted16 = encrypter.decrypt16(encryptedHexString, iv: ivee);
-    print('decrypted16: $decrypted16');
-    print('length of decrypted: ${decrypted16.length}');
-    for (int i = 0; i < decrypted16.length; i++) {
-      try {
-        print(decrypted16.codeUnitAt(i));
-      } catch (e) {
-        print('exception at index $i: $e');
-      }
-    }
+    print('decrypted [length ${decrypted16.length}]: $decrypted16');
 
     incrCounter(decrypted16.length);
     return decrypted16.substring(5,decrypted16.length-1);
@@ -448,7 +442,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void resetState() {
-    logData('re-scanning...');
+    logData('...');
     setState(() {
       sub?.cancel();
       writeTarget = null;
