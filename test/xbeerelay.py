@@ -9,6 +9,7 @@ def relayData(data):
 def receiveCallback(dic):
     print('received message from ',dic['sender'])
     print(dic['message'])
+    # relayData('xbee received {}'.format(dic['message']))
 
 relay.callback(receiveCallback)
 

@@ -20,21 +20,21 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: MyHomePage(title: 'XBee BLE Test'),
+      home: XBeeRelayConsolePage(title: 'XBee BLE Test'),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
+class XBeeRelayConsolePage extends StatefulWidget {
+  XBeeRelayConsolePage({Key key, this.title}) : super(key: key);
 
   final String title;
 
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  _XBeeRelayConsolePageState createState() => _XBeeRelayConsolePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   List<BluetoothDevice> scannedDevices = [];
   List<DropdownMenuItem<BluetoothDevice>> scannedDevicesDDItems = [];
   BluetoothDevice selectedDevice;
@@ -45,24 +45,28 @@ class _MyHomePageState extends State<MyHomePage> {
 
   StreamSubscription sub;
   List<int> latestResponse;
-  List<String> incomingData = ['ℹ️ - notification / indication values go here...'];
+  List<String> incomingData = [
+    'ℹ️ - notification / indication values go here...',
+  ];
   BluetoothCharacteristic writeTarget;
 
   TextEditingController writeTC = TextEditingController();
   ScrollController sc = ScrollController();
 
-  XBeeAuth xba;
+  XBeeAuth xba = XBeeAuth('Fathom');
   bool unlocked = false;
+
   x.Encrypter encrypter;
-  int ivCounter = 1;
-  String ivCounterHex = '00000001';
+  int incomingCtr = 1;
+  int outgoingCtr = 1;
 
-
+  static const _payloadTiptext =
+      'Payload is everything between the length and checksum frames (calculated during runtime), written in hex.';
+  static const _sampleInput = '2D3D026869'; // L: 0005, CS: C2
 
   @override
   void initState() {
     super.initState();
-    xba = XBeeAuth('Fathom');
   }
 
   @override
@@ -72,28 +76,30 @@ class _MyHomePageState extends State<MyHomePage> {
         title: Text(widget.title),
       ),
       body: Padding(
-          padding: EdgeInsets.all(20),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                headingText('Devices', 16),
-                scannedDevicesRow(),
-                SizedBox(height: 10),
-                headingText('Services', 16),
-                servicesDropdown(),
-                SizedBox(height: 30),
-                headingText('Console', 16),
-                readSection(),
-                SizedBox(height: 30),
-                headingText('Send Payload', 16),
-                // headingText('XBee Unlock', 16),
-                // sendRequestSection(),
-                writeSection(),
-              ],
-            ),
-          )),
+        padding: EdgeInsets.all(20),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              headingText('Devices', 16),
+              scannedDevicesRow(),
+              SizedBox(height: 10),
+              headingText('Services', 16),
+              servicesDropdown(),
+              SizedBox(height: 30),
+              headingText('Console', 16),
+              consoleSection(),
+              SizedBox(height: 30),
+              headingText('Send Payload', 16),
+              writeSection(),
+              SizedBox(height: 5),
+              Text(_payloadTiptext,
+                  style: TextStyle(fontStyle: FontStyle.italic)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -114,7 +120,7 @@ class _MyHomePageState extends State<MyHomePage> {
         scannedDevicesDropdown(),
         SizedBox(width: 10),
         scanBtn(),
-        SizedBox(width:5),
+        SizedBox(width: 5),
         ElevatedButton(
           onPressed: () {
             try {
@@ -122,7 +128,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 logData('unlock process finished');
               });
             } catch (e) {
-              logData('error in unlock process: $e',prefix:'error');
+              logData('error in unlock process: $e', type: 'error');
             }
           },
           child: Icon(Icons.lock_open),
@@ -180,7 +186,7 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget readSection() {
+  Widget consoleSection() {
     return Container(
       margin: EdgeInsets.only(top: 10),
       padding: EdgeInsets.all(5),
@@ -209,20 +215,30 @@ class _MyHomePageState extends State<MyHomePage> {
         Expanded(
           child: TextField(
             controller: writeTC,
-            decoration: InputDecoration(
-              hintText: (writeTarget == null)
-                  ? "no write characteristic found"
-                  : writeTarget.uuid.toString(),
-            ),
+            decoration: InputDecoration(hintText: 'ex: $_sampleInput ("hi")'),
           ),
         ),
         SizedBox(width: 10),
         ElevatedButton(
           child: Icon(Icons.send),
-          // onPressed: sendToWriteTarget,
+          onPressed: sendEncrypted,
         ),
       ],
     );
+  }
+
+  void sendEncrypted() {
+    try {
+      final decoded =
+          hex.decode((writeTC.text.isNotEmpty) ? writeTC.text : _sampleInput);
+      logData('raw: $decoded', type: 'out');
+      
+      final encrypted = encryptAES(decoded);
+      logData('encrypted: $encrypted', type: 'out');
+      sendToWriteTarget(encrypted);
+    } on FormatException {
+      logData('payload must be in hex, even length, no spaces', type: 'error');
+    }
   }
 
   Future<void> xbeeUnlock() async {
@@ -230,7 +246,7 @@ class _MyHomePageState extends State<MyHomePage> {
     try {
       sendStep1();
     } on FormatException {
-      logData('odd ephemeral generated. please try again',prefix:'error');
+      logData('odd ephemeral generated. please try again', type: 'error');
     }
 
     // step 2: server presents salt and B (need to wait)
@@ -273,36 +289,26 @@ class _MyHomePageState extends State<MyHomePage> {
       xba.step4(latestResponse);
       unlocked = true;
     } catch (e) {
-      logData('error in verifying session $e', prefix: 'error');
+      logData('error in verifying session $e', type: 'error');
       return;
     }
 
     // create the aes algo and encrypter
+    createAES();
+  }
+
+  void createAES() {
     final aes = x.AES(
       x.Key.fromBase16(xba.sesh.key),
       mode: x.AESMode.ctr,
       padding: null,
     );
     encrypter = x.Encrypter(aes);
-
-    final aes2 = x.AES(
-      x.Key.fromBase16(xba.sesh.key),
-      mode: x.AESMode.sic,
-    );
   }
 
   void sendToWriteTarget(List<int> send) {
-    logData(send.toString(), prefix:'out');
+    logData(send.toString(), type: 'out');
     writeTarget.write(send);
-  }
-
-  void sendEncrypted() {
-    try {
-      final decoded = hex.decode(writeTC.text);
-      
-    } on FormatException {
-      logData('written command must be in hex',prefix: 'error');
-    }
   }
 
   void selectDevice(BluetoothDevice btd) {
@@ -317,7 +323,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void connectAndDiscover() async {
     bt.connectToDevice(selectedDevice).then((success) async {
       if (!success) {
-        logData('unsuccessful connection', prefix: 'error');
+        logData('unsuccessful connection', type: 'error');
         return;
       } else {
         // discover services then characteristics
@@ -333,7 +339,7 @@ class _MyHomePageState extends State<MyHomePage> {
             });
           });
         } catch (e) {
-          logData('error during mtu request: $e', prefix: 'error');
+          logData('error during mtu request: $e', type: 'error');
         }
 
         // re-render
@@ -367,26 +373,22 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void handleSelectedServ() async {
-    sub?.cancel();
-    var alreadySubbedToSomething = false;
     selectedService.characteristics.forEach((char) {
       if (char.properties.notify || char.properties.indicate) {
-        logData(
-            'subscribing to notifications / indications for only ${char.uuid}');
-        if (!alreadySubbedToSomething) {
-          sub = char.value.listen(
-            (val) {
-              latestResponse = val;
-              logData('raw: $val',prefix:'in');
+        logData('subscribing to updates from ${char.uuid}');
+        sub?.cancel();
+        sub = char.value.listen(
+          (val) {
+            latestResponse = val;
+            logData('raw: $val', type: 'in');
 
-              if (unlocked) {
-                logData(decryptAES(hex.encode(val)),prefix:'in');
-              }
-            },
-            cancelOnError: true,
-          );
-          char.setNotifyValue(true);
-        }
+            if (unlocked) {
+              logData(decryptAES(val), type: 'in');
+            }
+          },
+          cancelOnError: true,
+        );
+        char.setNotifyValue(true);
       }
 
       if (char.properties.write) {
@@ -396,19 +398,19 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  static const LOG_EMOJIS = {
+  static const _LOG_EMOJIS = {
     'in': '📲',
     'out': '🔜',
     'error': '❌',
     'info': 'ℹ️'
   };
-  void logData(String item, {String prefix}) {
+  void logData(String item, {String type}) {
     if (incomingData.length >= 25) {
       incomingData.removeLast();
     }
-    final pre = prefix ?? 'info';
-    final msg = '${LOG_EMOJIS[pre]} - $item';
-    
+    final pre = type ?? 'info';
+    final msg = '${_LOG_EMOJIS[pre]} - $item';
+
     print(msg);
     setState(() {
       incomingData.insert(0, '${getNowTime()} - $msg');
@@ -419,26 +421,72 @@ class _MyHomePageState extends State<MyHomePage> {
     return '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}';
   }
 
-  String decryptAES(String encryptedHexString) {
-    print('input: $encryptedHexString');
+  String decryptAES(List<int> val) {
+    print('to decrypt: $val');
 
-    final ivhex = '${xba.rxNonce}$ivCounterHex';
+    final ivhex = '${xba.rxNonce}${getCounterHexString(incomingCtr)}';
     final ivee = x.IV.fromBase16(ivhex);
     print('iv: ${ivee.base16}');
 
-    final decrypted16 = encrypter.decrypt16(encryptedHexString, iv: ivee);
-    print('decrypted [length ${decrypted16.length}]: $decrypted16');
+    final decrypted =
+        encrypter.decryptBytes(x.Encrypted(val), iv: ivee);
+    print('decrypted [length ${decrypted.length}]: $decrypted');
 
-    incrCounter(decrypted16.length);
-    return decrypted16.substring(5,decrypted16.length-1);
+    // increment the counter by how many blocks
+    incomingCtr += decrypted.length ~/16;
+    return String.fromCharCodes(decrypted.sublist(5, decrypted.length - 1));
   }
 
-  void incrCounter(int magnitude) {
-    final incr = magnitude ~/ 16;
-    ivCounter += incr;
+  List<int> encryptAES(List<int> bytes) {
+    // pad data
+    final paddedBytes = padWithNulls(bytes);
 
-    // convert to padded hex
-    ivCounterHex = ivCounter.toRadixString(16).padLeft(8,'0');
+    // add frames
+    List<int> toEncrypt = [
+      126, // 0x7e
+      ...lengthInts(paddedBytes),
+      ...paddedBytes,
+      getChecksumInt(paddedBytes),
+    ];
+    
+    // create initialization vector
+    final ivhex = '${xba.txNonce}${getCounterHexString(outgoingCtr)}';
+    final ivee = x.IV.fromBase16(ivhex);
+    print('iv: ${ivee.base16}');
+
+    // encrypt
+    final encrypted = encrypter.encryptBytes(toEncrypt, iv: ivee);
+    print('encrypted [length ${encrypted.bytes.length}]: ${encrypted.bytes}');
+    
+    // increment the counter by how many blocks
+    outgoingCtr += encrypted.bytes.length ~/ 16;
+    return encrypted.bytes;  
+  }
+
+  List<int> lengthInts(List<int> data) {
+    // return 2 bytes representing length of the data
+    return hex.decode(hex.encode([data.length]).padLeft(4,'0'));
+  }
+
+  int getChecksumInt(List<int> data) {
+    final intsum = xba.listSum(data);
+    final hexsum = intsum.toRadixString(16);
+
+    // truncate and subtract from 0xFF (255 in decimal)
+    final last2Digits = hexsum.substring(hexsum.length - 2, hexsum.length);
+    return 255 - int.parse(last2Digits, radix: 16);
+  }
+
+  List<int> padWithNulls(List<int> original) {
+    var newlist = List<int>.from(original);
+    while ((newlist.length+4)%16 != 0) {
+      newlist.add(0);
+    }
+    return newlist;
+  }
+
+  String getCounterHexString(int ctr) {
+    return ctr.toRadixString(16).padLeft(8,'0');
   }
 
   void resetState() {
