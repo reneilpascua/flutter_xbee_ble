@@ -62,7 +62,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
   static const _payloadTiptext =
       'Payload is everything between the length and checksum frames (calculated during runtime), written in hex.';
-  static const _sampleInput = '2D3D026869'; // L: 0005, CS: C2
+  static const _sampleInput = '2D00026869';
 
   @override
   void initState() {
@@ -232,9 +232,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       final decoded =
           hex.decode((writeTC.text.isNotEmpty) ? writeTC.text : _sampleInput);
       logData('raw: $decoded', type: 'out');
-      
+
       final encrypted = encryptAES(decoded);
-      logData('encrypted: $encrypted', type: 'out');
       sendToWriteTarget(encrypted);
     } on FormatException {
       logData('payload must be in hex, even length, no spaces', type: 'error');
@@ -381,10 +380,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
           (val) {
             latestResponse = val;
             logData('raw: $val', type: 'in');
-
-            if (unlocked) {
-              logData(decryptAES(val), type: 'in');
-            }
+            if (unlocked) logData('decrypted: ${decryptAES(val)}', type: 'in');
           },
           cancelOnError: true,
         );
@@ -428,13 +424,14 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     final ivee = x.IV.fromBase16(ivhex);
     print('iv: ${ivee.base16}');
 
-    final decrypted =
-        encrypter.decryptBytes(x.Encrypted(val), iv: ivee);
+    final decrypted = encrypter.decryptBytes(x.Encrypted(val), iv: ivee);
     print('decrypted [length ${decrypted.length}]: $decrypted');
 
     // increment the counter by how many blocks
-    incomingCtr += decrypted.length ~/16;
-    return String.fromCharCodes(decrypted.sublist(5, decrypted.length - 1));
+    incomingCtr += decrypted.length ~/ 16;
+    return String.fromCharCodes(
+        // decrypted.sublist(5, decrypted.length - 1)
+        decrypted);
   }
 
   List<int> encryptAES(List<int> bytes) {
@@ -448,7 +445,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       ...paddedBytes,
       getChecksumInt(paddedBytes),
     ];
-    
+
     // create initialization vector
     final ivhex = '${xba.txNonce}${getCounterHexString(outgoingCtr)}';
     final ivee = x.IV.fromBase16(ivhex);
@@ -457,15 +454,15 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     // encrypt
     final encrypted = encrypter.encryptBytes(toEncrypt, iv: ivee);
     print('encrypted [length ${encrypted.bytes.length}]: ${encrypted.bytes}');
-    
+
     // increment the counter by how many blocks
     outgoingCtr += encrypted.bytes.length ~/ 16;
-    return encrypted.bytes;  
+    return encrypted.bytes;
   }
 
   List<int> lengthInts(List<int> data) {
     // return 2 bytes representing length of the data
-    return hex.decode(hex.encode([data.length]).padLeft(4,'0'));
+    return hex.decode(hex.encode([data.length]).padLeft(4, '0'));
   }
 
   int getChecksumInt(List<int> data) {
@@ -479,14 +476,14 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
   List<int> padWithNulls(List<int> original) {
     var newlist = List<int>.from(original);
-    while ((newlist.length+4)%16 != 0) {
+    while ((newlist.length + 4) % 16 != 0) {
       newlist.add(0);
     }
     return newlist;
   }
 
   String getCounterHexString(int ctr) {
-    return ctr.toRadixString(16).padLeft(8,'0');
+    return ctr.toRadixString(16).padLeft(8, '0');
   }
 
   void resetState() {
