@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:convert/convert.dart';
 import 'package:encrypt/encrypt.dart' as x;
 
@@ -60,8 +61,10 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   int incomingCtr = 1;
   int outgoingCtr = 1;
 
+  _SEND_MODE_ENUM mode = _SEND_MODE_ENUM.HEX;
+
   static const _payloadTiptext =
-      'Payload is everything between the length and checksum frames (calculated during runtime), written in hex.';
+      'Content will be wrapped with 7E:LL:LL: ... :CS, then encrypted. Check XBee documentation for more info.';
   static const _sampleInput = '2D00026869';
 
   @override
@@ -91,7 +94,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
               headingText('Console', 16),
               consoleSection(),
               SizedBox(height: 30),
-              headingText('Send Payload', 16),
+              headingText('Write to XBee', 16),
+              radioRow(),
               writeSection(),
               SizedBox(height: 5),
               Text(_payloadTiptext,
@@ -100,6 +104,42 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget radioRow() {
+    return Row(
+      children: <Widget>[
+        Text('Input mode:'),
+        Flexible(
+          child: ListTile(
+            title: const Text('Hex'),
+            leading: Radio<_SEND_MODE_ENUM>(
+              value: _SEND_MODE_ENUM.HEX,
+              groupValue: mode,
+              onChanged: (value) {
+                setState(() {
+                  mode = value;
+                });
+              },
+            ),
+          ),
+        ),
+        Flexible(
+          child: ListTile(
+            title: const Text('Text'),
+            leading: Radio<_SEND_MODE_ENUM>(
+              value: _SEND_MODE_ENUM.ASCII_TEXT,
+              groupValue: mode,
+              onChanged: (value) {
+                setState(() {
+                  mode = value;
+                });
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -121,18 +161,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         SizedBox(width: 10),
         scanBtn(),
         SizedBox(width: 5),
-        ElevatedButton(
-          onPressed: () {
-            try {
-              xbeeUnlock().then((e) {
-                logData('unlock process finished');
-              });
-            } catch (e) {
-              logData('error in unlock process: $e', type: 'error');
-            }
-          },
-          child: Icon(Icons.lock_open),
-        )
+        unlockBtn(),
       ],
     );
   }
@@ -143,7 +172,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         isExpanded: true,
         items: scannedDevicesAsDropdown(),
         value: selectedDevice,
-        hint: Text('scan to find devices'),
+        hint: Text('select an XBee device'),
         onChanged: selectDevice,
       ),
     );
@@ -190,7 +219,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     return Container(
       margin: EdgeInsets.only(top: 10),
       padding: EdgeInsets.all(5),
-      constraints: BoxConstraints.expand(height: 300),
+      constraints: BoxConstraints.expand(height: 200),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.grey, width: 2),
@@ -221,22 +250,60 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         SizedBox(width: 10),
         ElevatedButton(
           child: Icon(Icons.send),
-          onPressed: sendEncrypted,
+          onPressed: (unlocked) ? sendEncrypted : null,
         ),
       ],
     );
   }
 
+  Widget unlockBtn() {
+    return ElevatedButton(
+      style: (unlocked) ? ElevatedButton.styleFrom(primary: Colors.red) : null,
+      onPressed: (selectedDevice != null)
+          ? () {
+              if (unlocked) {
+                // disconnect
+                logData('disconnect not implemented yet', type: 'error');
+              } else {
+                try {
+                  xbeeUnlock().then((e) {
+                    logData('unlock process finished');
+                  });
+                } catch (e) {
+                  logData('error in unlock process: $e', type: 'error');
+                  return;
+                }
+              }
+            }
+          : null,
+      child: Icon(Icons.lock_open),
+    );
+  }
+
   void sendEncrypted() {
+    final defaultIn = (mode == _SEND_MODE_ENUM.HEX) ? _sampleInput : 'hi';
+    var toEncrypt = (writeTC.text.isNotEmpty) ? writeTC.text : defaultIn;
+
+    if (mode == _SEND_MODE_ENUM.ASCII_TEXT) {
+      toEncrypt = '2D0002' +
+          hex.encode(utf8.encode(
+              toEncrypt)); // data input 0x2d, frame id 0x00, interface 0x02
+    }
+
     try {
-      final decoded =
-          hex.decode((writeTC.text.isNotEmpty) ? writeTC.text : _sampleInput);
+      final decoded = hex.decode(toEncrypt);
       logData('raw: $decoded', type: 'out');
 
       final encrypted = encryptAES(decoded);
       sendToWriteTarget(encrypted);
     } on FormatException {
-      logData('payload must be in hex, even length, no spaces', type: 'error');
+      if (mode == _SEND_MODE_ENUM.HEX)
+        logData('content must be in hex, even length, no spaces',
+            type: 'error');
+      return;
+    } catch (e) {
+      logData('error when sending: $e', type: 'error');
+      return;
     }
   }
 
@@ -246,6 +313,10 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       sendStep1();
     } on FormatException {
       logData('odd ephemeral generated. please try again', type: 'error');
+      return;
+    } catch (e) {
+      logData('error in step 1: $e', type: 'error');
+      return;
     }
 
     // step 2: server presents salt and B (need to wait)
@@ -339,6 +410,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
           });
         } catch (e) {
           logData('error during mtu request: $e', type: 'error');
+          return;
         }
 
         // re-render
@@ -380,7 +452,6 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
           (val) {
             latestResponse = val;
             logData('raw: $val', type: 'in');
-            if (unlocked) logData('decrypted: ${decryptAES(val)}', type: 'in');
           },
           cancelOnError: true,
         );
@@ -396,7 +467,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
   static const _LOG_EMOJIS = {
     'in': '📲',
-    'out': '🔜',
+    'out': '📤',
     'error': '❌',
     'info': 'ℹ️'
   };
@@ -425,13 +496,14 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     print('iv: ${ivee.base16}');
 
     final decrypted = encrypter.decryptBytes(x.Encrypted(val), iv: ivee);
-    print('decrypted [length ${decrypted.length}]: $decrypted');
+    logData('decrypted (${decrypted.length} bytes): $decrypted');
+
+    final decryptedUtf8 = String.fromCharCodes(decrypted);
+    logData('decrypted (utf-8): $decryptedUtf8');
 
     // increment the counter by how many blocks
     incomingCtr += decrypted.length ~/ 16;
-    return String.fromCharCodes(
-        // decrypted.sublist(5, decrypted.length - 1)
-        decrypted);
+    return decryptedUtf8;
   }
 
   List<int> encryptAES(List<int> bytes) {
@@ -509,3 +581,5 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     super.dispose();
   }
 }
+
+enum _SEND_MODE_ENUM { ASCII_TEXT, HEX }

@@ -1,7 +1,7 @@
 
 import 'package:convert/convert.dart';
 main() {
-  final hi = hex.decode('7e0f0f0ff');
+  final hi = hex.decode('7e0f0f0f');
   print(hi);
 }
 
