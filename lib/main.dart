@@ -5,6 +5,7 @@ import 'package:encrypt/encrypt.dart' as x;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue/flutter_blue.dart';
+import 'package:xbee_test/xbee_encrypter.dart';
 import 'bt_logic.dart' as bt;
 import 'xbee_auth.dart';
 
@@ -44,10 +45,12 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   List<BluetoothService> discoveredServices = [];
   BluetoothService selectedService;
 
-  StreamSubscription sub;
+  StreamSubscription mtuSub;
+  StreamSubscription connectionSub;
+  StreamSubscription responseSub;
   List<int> latestResponse;
   List<String> incomingData = [
-    'ℹ️ - notification / indication values go here...',
+    '🐝 - please ensure your Bluetooth and location services are turned on.',
   ];
   BluetoothCharacteristic writeTarget;
 
@@ -55,6 +58,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   ScrollController sc = ScrollController();
 
   XBeeAuth xba = XBeeAuth('Fathom');
+  XBeeEncrypter xbe;
   bool unlocked = false;
 
   x.Encrypter encrypter;
@@ -87,13 +91,13 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
             children: <Widget>[
               headingText('Devices', 16),
               scannedDevicesRow(),
-              SizedBox(height: 10),
-              headingText('Services', 16),
-              servicesDropdown(),
-              SizedBox(height: 30),
+              SizedBox(height: 20),
+              // headingText('Services', 16),
+              // servicesDropdown(),
+              // SizedBox(height: 30),
               headingText('Console', 16),
               consoleSection(),
-              SizedBox(height: 30),
+              SizedBox(height: 20),
               headingText('Write to XBee', 16),
               radioRow(),
               writeSection(),
@@ -259,11 +263,10 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   Widget unlockBtn() {
     return ElevatedButton(
       style: (unlocked) ? ElevatedButton.styleFrom(primary: Colors.red) : null,
-      onPressed: (selectedDevice != null)
+      onPressed: (selectedService != null)
           ? () {
               if (unlocked) {
-                // disconnect
-                logData('disconnect not implemented yet', type: 'error');
+                disconnectAndClear();
               } else {
                 try {
                   xbeeUnlock().then((e) {
@@ -285,7 +288,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     var toEncrypt = (writeTC.text.isNotEmpty) ? writeTC.text : defaultIn;
 
     if (mode == _SEND_MODE_ENUM.ASCII_TEXT) {
-      toEncrypt = '2D0002' +
+      toEncrypt = '2D0001' +
           hex.encode(utf8.encode(
               toEncrypt)); // data input 0x2d, frame id 0x00, interface 0x02
     }
@@ -311,11 +314,11 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     // step 1: send A to server
     try {
       sendStep1();
-    } on FormatException {
-      logData('odd ephemeral generated. please try again', type: 'error');
+    } on FormatException catch(f) {
+      logData('format exception caught. please try again. $f', type: 'error');
       return;
     } catch (e) {
-      logData('error in step 1: $e', type: 'error');
+      logData('general error in step 1: $e', type: 'error');
       return;
     }
 
@@ -365,6 +368,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
     // create the aes algo and encrypter
     createAES();
+    // xbe = XBeeEncrypter(xba.sesh.key, xba.txNonce, xba.rxNonce);
   }
 
   void createAES() {
@@ -391,20 +395,39 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   }
 
   void connectAndDiscover() async {
+    logData('attempting connection with ${selectedDevice.name}');
     bt.connectToDevice(selectedDevice).then((success) async {
       if (!success) {
-        logData('unsuccessful connection', type: 'error');
+        logData('unsuccessful connection with ${selectedDevice.name}',
+            type: 'error');
+        disconnectAndClear();
         return;
       } else {
         // discover services then characteristics
         discoveredServices = await bt.discoverCharacteristics(selectedDevice);
+        logData('searching for XBee API service...');
+
+        // see if this has the xbee ble api service
+        BluetoothService theOne;
+        for (BluetoothService bts in discoveredServices) {
+          if (bts.uuid.toString() == '53da53b9-0447-425a-b9ea-9837505eb59a') {
+            theOne = bts;
+            break;
+          }
+        }
+
+        if (theOne == null) {
+          logData('xbee api service not found. disconnecting.', type: 'error');
+          disconnectAndClear();
+          return;
+        }
 
         // request max MTU
         try {
           logData('requesting mtu of 512...');
           selectedDevice.requestMtu(512).then((_) async {
             await Future.delayed(Duration(seconds: 1));
-            sub = selectedDevice.mtu.listen((newmtu) {
+            mtuSub = selectedDevice.mtu.listen((newmtu) {
               logData('new mtu: ${newmtu.toString()}');
             });
           });
@@ -412,6 +435,24 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
           logData('error during mtu request: $e', type: 'error');
           return;
         }
+
+        // wait a second for the MTU request to finalize
+        await Future.delayed(Duration(seconds: 1));
+        
+        // assign connection state listener
+        connectionSub = selectedDevice.state.listen(
+          (state) {
+            if (state == BluetoothDeviceState.disconnected) {
+              logData('device disconnected', type:'error');
+              scannedDevices.clear();
+              disconnectAndClear();
+
+            }
+          }
+        );
+        
+        selectedService = theOne;
+        handleSelectedServ();
 
         // re-render
         setState(() {});
@@ -428,6 +469,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   }
 
   void scanForDevices() async {
+    logData('scanning...');
     // reset scan results and disable button
     resetState();
     setState(() {
@@ -447,11 +489,14 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     selectedService.characteristics.forEach((char) {
       if (char.properties.notify || char.properties.indicate) {
         logData('subscribing to updates from ${char.uuid}');
-        sub?.cancel();
-        sub = char.value.listen(
+        responseSub?.cancel();
+        responseSub = char.value.listen(
           (val) {
             latestResponse = val;
             logData('raw: $val', type: 'in');
+            if (unlocked) {
+              decryptAES(val);
+            }
           },
           cancelOnError: true,
         );
@@ -559,9 +604,11 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   }
 
   void resetState() {
-    logData('...');
+    resetAuth();
     setState(() {
-      sub?.cancel();
+      mtuSub?.cancel();
+      responseSub?.cancel();
+      connectionSub?.cancel();
       writeTarget = null;
       selectedService = null;
       discoveredServices.clear();
@@ -570,6 +617,31 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       scannedDevicesDDItems.clear();
     });
   }
+  
+  void resetAuth() {
+    xba = new XBeeAuth('Fathom');
+    xbe = null;
+    unlocked = false;
+    encrypter = null;
+    incomingCtr = 1;
+    outgoingCtr = 1;
+  }
+
+  void disconnectAndClear() {
+    selectedDevice?.disconnect();
+
+    mtuSub?.cancel();
+    responseSub?.cancel();
+    connectionSub?.cancel();
+    
+    resetAuth();
+    selectedService = null;
+    discoveredServices.clear();
+    setState(() {
+      selectedDevice = null;
+    });
+  }
+
 
   @override
   void deactivate() {

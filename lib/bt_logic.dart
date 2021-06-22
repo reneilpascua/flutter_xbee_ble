@@ -34,8 +34,11 @@ Future<bool> connectToDevice(BluetoothDevice btd) async {
   if (connectedDevices.contains(btd)) {
     print('already connected to ${btd.name}');
   } else {
+    print('attempting connection with ${btd.name}');
     try {
-      await btd.connect();
+      await btd.connect().timeout(Duration(seconds: 3), onTimeout: () {
+        throw Exception('timeout');
+      });
       print('connected to ${btd.name}');
     } catch (e) {
       print('error connecting to device $e');

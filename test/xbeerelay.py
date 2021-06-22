@@ -12,4 +12,6 @@ return data
 
 relayData = lambda data : relay.send(relay.BLUETOOTH, padRelayData(data))
 
-relay.callback(lambda dic : relayData('xbee received {}'.format(dic['message'])))
+# relay.callback(lambda dic : relayData('xbee received {}'.format(dic['message'])))
+
+relay.callback(lambda dic : print('xbee received message {}'.format(dic['message'])))
