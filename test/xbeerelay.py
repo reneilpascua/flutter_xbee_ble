@@ -1,17 +1,2 @@
-# lack of indentation required for micropython
-def padRelayData(data):
-while((len(data)+6) % 16 != 0): data += '\0'
-return data
-
-
-
-
-
-
-
-
-relayData = lambda data : relay.send(relay.BLUETOOTH, padRelayData(data))
-
-# relay.callback(lambda dic : relayData('xbee received {}'.format(dic['message'])))
-
+relay.callback(lambda dic : relay.send(relay.BLUETOOTH, 'xbee received {}'.format(dic['message'])))
 relay.callback(lambda dic : print('xbee received message {}'.format(dic['message'])))

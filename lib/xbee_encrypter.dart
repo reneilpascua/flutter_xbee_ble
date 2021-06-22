@@ -34,8 +34,8 @@ class XBeeEncrypter {
 
     // encrypt the whole thing
     var encrypted = xbe
-        .encrypt(
-          utf8.decode(offsetPlaintext),
+        .encryptBytes(
+          offsetPlaintext,
           iv: x.IV.fromBase16(rxNonce + getCounterHex(rxCtr)),
         )
         .bytes;

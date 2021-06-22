@@ -57,7 +57,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   TextEditingController writeTC = TextEditingController();
   ScrollController sc = ScrollController();
 
-  XBeeAuth xba = XBeeAuth('Fathom');
+  XBeeAuth xba;
+  final pw = 'Fathom';
   XBeeEncrypter xbe;
   bool unlocked = false;
 
@@ -67,9 +68,9 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
   _SEND_MODE_ENUM mode = _SEND_MODE_ENUM.HEX;
 
-  static const _payloadTiptext =
+  final _payloadTiptext =
       'Content will be wrapped with 7E:LL:LL: ... :CS, then encrypted. Check XBee documentation for more info.';
-  static const _sampleInput = '2D00026869';
+  final _sampleInput = '2D3D0252656C6179'; // "relay"
 
   @override
   void initState() {
@@ -99,7 +100,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
               consoleSection(),
               SizedBox(height: 20),
               headingText('Write to XBee', 16),
-              radioRow(),
+              // radioRow(),
               writeSection(),
               SizedBox(height: 5),
               Text(_payloadTiptext,
@@ -248,7 +249,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         Expanded(
           child: TextField(
             controller: writeTC,
-            decoration: InputDecoration(hintText: 'ex: $_sampleInput ("hi")'),
+            decoration: InputDecoration(hintText: 'ex: $_sampleInput ("relay")'),
           ),
         ),
         SizedBox(width: 10),
@@ -268,6 +269,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
               if (unlocked) {
                 disconnectAndClear();
               } else {
+                logData('authenticating with password');
+                xba = XBeeAuth(pw);
                 try {
                   xbeeUnlock().then((e) {
                     logData('unlock process finished');
@@ -283,38 +286,63 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     );
   }
 
+  // void sendEncrypted() {
+  //   final defaultIn = (mode == _SEND_MODE_ENUM.HEX) ? _sampleInput : 'hi';
+  //   var toEncrypt = (writeTC.text.isNotEmpty) ? writeTC.text : defaultIn;
+
+  //   if (mode == _SEND_MODE_ENUM.ASCII_TEXT) {
+  //     toEncrypt = '2D0001' +
+  //         hex.encode(utf8.encode(
+  //             toEncrypt)); // data input 0x2d, frame id 0x00, interface 0x02
+  //   }
+
+  //   try {
+  //     final decoded = hex.decode(toEncrypt);
+  //     logData('raw: $decoded', type: 'out');
+
+  //     final encrypted = encryptAES(decoded);
+  //     sendToWriteTarget(encrypted);
+  //   } on FormatException catch (fe) {
+  //     if (mode == _SEND_MODE_ENUM.HEX)
+  //       logData('content must be in hex, even length, no spaces... $fe',
+  //           type: 'error');
+  //     return;
+  //   } catch (e) {
+  //     logData('error when sending: $e', type: 'error');
+  //     return;
+  //   }
+  // }
+
   void sendEncrypted() {
-    final defaultIn = (mode == _SEND_MODE_ENUM.HEX) ? _sampleInput : 'hi';
-    var toEncrypt = (writeTC.text.isNotEmpty) ? writeTC.text : defaultIn;
-
-    if (mode == _SEND_MODE_ENUM.ASCII_TEXT) {
-      toEncrypt = '2D0001' +
-          hex.encode(utf8.encode(
-              toEncrypt)); // data input 0x2d, frame id 0x00, interface 0x02
-    }
-
+    List<int> decodedBytes;
+    // convert hex string to bytes
     try {
-      final decoded = hex.decode(toEncrypt);
-      logData('raw: $decoded', type: 'out');
-
-      final encrypted = encryptAES(decoded);
-      sendToWriteTarget(encrypted);
-    } on FormatException catch(fe) {
-      if (mode == _SEND_MODE_ENUM.HEX)
-        logData('content must be in hex, even length, no spaces... $fe',
-            type: 'error');
+      decodedBytes =
+          hex.decode((writeTC.text.isEmpty) ? _sampleInput : writeTC.text);
+      // add frames
+      decodedBytes = [
+        126,
+        ...lengthInts(decodedBytes),
+        ...decodedBytes,
+        getChecksumInt(decodedBytes),
+      ];
+    } on FormatException catch (fe) {
+      logData('content must be in hex, even length, no spaces. $fe',
+          type: 'error');
       return;
     } catch (e) {
-      logData('error when sending: $e', type: 'error');
+      logData('error in constructing frame... $e', type: 'error');
       return;
     }
+    // sendToWriteTarget(encrypt(decodedBytes));
+    sendToWriteTarget(decodedBytes);
   }
 
   Future<void> xbeeUnlock() async {
     // step 1: send A to server
     try {
       sendStep1();
-    } on FormatException catch(f) {
+    } on FormatException catch (f) {
       logData('format exception caught. please try again. $f', type: 'error');
       return;
     } catch (e) {
@@ -438,19 +466,16 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
         // wait a second for the MTU request to finalize
         await Future.delayed(Duration(seconds: 1));
-        
-        // assign connection state listener
-        connectionSub = selectedDevice.state.listen(
-          (state) {
-            if (state == BluetoothDeviceState.disconnected) {
-              logData('device disconnected', type:'error');
-              scannedDevices.clear();
-              disconnectAndClear();
 
-            }
+        // assign connection state listener
+        connectionSub = selectedDevice.state.listen((state) {
+          if (state == BluetoothDeviceState.disconnected) {
+            logData('device disconnected', type: 'error');
+            scannedDevices.clear();
+            disconnectAndClear();
           }
-        );
-        
+        });
+
         selectedService = theOne;
         handleSelectedServ();
 
@@ -493,9 +518,9 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         responseSub = char.value.listen(
           (val) {
             latestResponse = val;
-            logData('raw: $val', type: 'in');
+            logData('raw incoming: $val', type: 'in');
             if (unlocked) {
-              decryptAES(val);
+              logData('decrypted: ${decrypt(val)}');
             }
           },
           cancelOnError: true,
@@ -533,26 +558,9 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     return '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}';
   }
 
-  void decryptAES(List<int> val) {
-    // print('to decrypt: $val');
-
-    // final ivhex = '${xba.rxNonce}${getCounterHexString(incomingCtr)}';
-    // final ivee = x.IV.fromBase16(ivhex);
-    // print('iv: ${ivee.base16}');
-
-    // final decrypted = encrypter.decryptBytes(x.Encrypted(val), iv: ivee);
-    // logData('decrypted (${decrypted.length} bytes): $decrypted');
-
-    // final decryptedUtf8 = String.fromCharCodes(decrypted);
-    // logData('decrypted (utf-8): $decryptedUtf8');
-
-    // // increment the counter by how many blocks
-    // incomingCtr += decrypted.length ~/ 16;
-    // return decryptedUtf8;
-
-    final decrypted = xbe.decrypt(val);
-    logData('decrypted (${decrypted.length}B): $decrypted');
-    // logData('decrypted (utf8): ${utf8.decode(decrypted)}');
+  List<int> decrypt(List<int> val) {
+    // TODO: differentiate return by utf8 or just bytes
+    return xbe.decrypt(val);
   }
 
   List<int> encryptAES(List<int> bytes) {
@@ -589,6 +597,11 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     ];
 
     return xbe.encrypt(toEncrypt);
+  }
+
+  List<int> encrypt(List<int> input) {
+    logData('raw outgoing: $input');
+    return xbe.encrypt(input);
   }
 
   List<int> lengthInts(List<int> data) {
@@ -631,7 +644,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       scannedDevicesDDItems.clear();
     });
   }
-  
+
   void resetAuth() {
     xba = new XBeeAuth('Fathom');
     xbe = null;
@@ -647,7 +660,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     mtuSub?.cancel();
     responseSub?.cancel();
     connectionSub?.cancel();
-    
+
     resetAuth();
     selectedService = null;
     discoveredServices.clear();
@@ -655,7 +668,6 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       selectedDevice = null;
     });
   }
-
 
   @override
   void deactivate() {
