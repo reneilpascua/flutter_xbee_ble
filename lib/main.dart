@@ -299,9 +299,9 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
       final encrypted = encryptAES(decoded);
       sendToWriteTarget(encrypted);
-    } on FormatException {
+    } on FormatException catch(fe) {
       if (mode == _SEND_MODE_ENUM.HEX)
-        logData('content must be in hex, even length, no spaces',
+        logData('content must be in hex, even length, no spaces... $fe',
             type: 'error');
       return;
     } catch (e) {
@@ -367,8 +367,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     }
 
     // create the aes algo and encrypter
-    createAES();
-    // xbe = XBeeEncrypter(xba.sesh.key, xba.txNonce, xba.rxNonce);
+    // createAES();
+    xbe = XBeeEncrypter(xba.sesh.key, xba.txNonce, xba.rxNonce);
   }
 
   void createAES() {
@@ -533,48 +533,62 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     return '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}';
   }
 
-  String decryptAES(List<int> val) {
-    print('to decrypt: $val');
+  void decryptAES(List<int> val) {
+    // print('to decrypt: $val');
 
-    final ivhex = '${xba.rxNonce}${getCounterHexString(incomingCtr)}';
-    final ivee = x.IV.fromBase16(ivhex);
-    print('iv: ${ivee.base16}');
+    // final ivhex = '${xba.rxNonce}${getCounterHexString(incomingCtr)}';
+    // final ivee = x.IV.fromBase16(ivhex);
+    // print('iv: ${ivee.base16}');
 
-    final decrypted = encrypter.decryptBytes(x.Encrypted(val), iv: ivee);
-    logData('decrypted (${decrypted.length} bytes): $decrypted');
+    // final decrypted = encrypter.decryptBytes(x.Encrypted(val), iv: ivee);
+    // logData('decrypted (${decrypted.length} bytes): $decrypted');
 
-    final decryptedUtf8 = String.fromCharCodes(decrypted);
-    logData('decrypted (utf-8): $decryptedUtf8');
+    // final decryptedUtf8 = String.fromCharCodes(decrypted);
+    // logData('decrypted (utf-8): $decryptedUtf8');
 
-    // increment the counter by how many blocks
-    incomingCtr += decrypted.length ~/ 16;
-    return decryptedUtf8;
+    // // increment the counter by how many blocks
+    // incomingCtr += decrypted.length ~/ 16;
+    // return decryptedUtf8;
+
+    final decrypted = xbe.decrypt(val);
+    logData('decrypted (${decrypted.length}B): $decrypted');
+    // logData('decrypted (utf8): ${utf8.decode(decrypted)}');
   }
 
   List<int> encryptAES(List<int> bytes) {
-    // pad data
-    final paddedBytes = padWithNulls(bytes);
+    // // pad data
+    // final paddedBytes = padWithNulls(bytes);
+
+    // // add frames
+    // List<int> toEncrypt = [
+    //   126, // 0x7e
+    //   ...lengthInts(paddedBytes),
+    //   ...paddedBytes,
+    //   getChecksumInt(paddedBytes),
+    // ];
+
+    // // create initialization vector
+    // final ivhex = '${xba.txNonce}${getCounterHexString(outgoingCtr)}';
+    // final ivee = x.IV.fromBase16(ivhex);
+    // print('iv: ${ivee.base16}');
+
+    // // encrypt
+    // final encrypted = encrypter.encryptBytes(toEncrypt, iv: ivee);
+    // print('encrypted [length ${encrypted.bytes.length}]: ${encrypted.bytes}');
+
+    // // increment the counter by how many blocks
+    // outgoingCtr += encrypted.bytes.length ~/ 16;
+    // return encrypted.bytes;
 
     // add frames
     List<int> toEncrypt = [
       126, // 0x7e
-      ...lengthInts(paddedBytes),
-      ...paddedBytes,
-      getChecksumInt(paddedBytes),
+      ...lengthInts(bytes),
+      ...bytes,
+      getChecksumInt(bytes),
     ];
 
-    // create initialization vector
-    final ivhex = '${xba.txNonce}${getCounterHexString(outgoingCtr)}';
-    final ivee = x.IV.fromBase16(ivhex);
-    print('iv: ${ivee.base16}');
-
-    // encrypt
-    final encrypted = encrypter.encryptBytes(toEncrypt, iv: ivee);
-    print('encrypted [length ${encrypted.bytes.length}]: ${encrypted.bytes}');
-
-    // increment the counter by how many blocks
-    outgoingCtr += encrypted.bytes.length ~/ 16;
-    return encrypted.bytes;
+    return xbe.encrypt(toEncrypt);
   }
 
   List<int> lengthInts(List<int> data) {
