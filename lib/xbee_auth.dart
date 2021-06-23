@@ -110,7 +110,9 @@ class XBeeAuth {
   /// If there are any problems, an exception will be thrown.
   void verifyResponse(List<int> response, int expectedStep) {
     // check if the step frame is correct
-    if (response[4] != expectedStep) {
+    if (response.length == 0) {
+      throw Exception('No response given by XBee. Try resetting the XBee.');
+    } else if (response[4] != expectedStep) {
       throw Exception(ERRORS_IN_STEP_FRAME[response[4]] ??
           'Error in step $expectedStep: 0x${response[4].toRadixString(16)}');
     }

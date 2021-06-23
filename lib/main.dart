@@ -1,20 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:convert/convert.dart';
-import 'package:encrypt/encrypt.dart' as x;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue/flutter_blue.dart';
 import 'package:xbee_test/xbee_encrypter.dart';
 import 'bt_logic.dart' as bt;
 import 'xbee_auth.dart';
+import 'helpers.dart' as h;
 
 void main() {
   runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -41,8 +40,6 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   List<DropdownMenuItem<BluetoothDevice>> scannedDevicesDDItems = [];
   BluetoothDevice selectedDevice;
   bool scanInProgress = false;
-
-  List<BluetoothService> discoveredServices = [];
   BluetoothService selectedService;
 
   StreamSubscription mtuSub;
@@ -55,21 +52,14 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   BluetoothCharacteristic writeTarget;
 
   TextEditingController writeTC = TextEditingController();
-  ScrollController sc = ScrollController();
 
-  XBeeAuth xba;
   final pw = 'Fathom';
+  XBeeAuth xba;
   XBeeEncrypter xbe;
   bool unlocked = false;
 
-  x.Encrypter encrypter;
-  int incomingCtr = 1;
-  int outgoingCtr = 1;
-
-  _SEND_MODE_ENUM mode = _SEND_MODE_ENUM.HEX;
-
   final _payloadTiptext =
-      'Content will be wrapped with 7E:LL:LL: ... :CS, then encrypted. Check XBee documentation for more info.';
+      'Write a hex command. It will be wrapped with 7E:LL:LL:...:CS. Check XBee documentation for more info.';
   final _sampleInput = '2D00026869'; // "hi"
 
   @override
@@ -84,67 +74,26 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         title: Text(widget.title),
       ),
       body: Padding(
-        padding: EdgeInsets.all(20),
-        child: Center(
+        padding: EdgeInsets.symmetric(horizontal: 20),
+        child: SingleChildScrollView(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              SizedBox(height: 20),
               headingText('Devices', 16),
               scannedDevicesRow(),
               SizedBox(height: 20),
-              // headingText('Services', 16),
-              // servicesDropdown(),
-              // SizedBox(height: 30),
               headingText('Console', 16),
               consoleSection(),
               SizedBox(height: 20),
               headingText('Write to XBee', 16),
-              // radioRow(),
-              writeSection(),
               SizedBox(height: 5),
-              Text(_payloadTiptext,
-                  style: TextStyle(fontStyle: FontStyle.italic)),
+              writeSection(),
             ],
           ),
         ),
       ),
-    );
-  }
-
-  Widget radioRow() {
-    return Row(
-      children: <Widget>[
-        Text('Input mode:'),
-        Flexible(
-          child: ListTile(
-            title: const Text('Hex'),
-            leading: Radio<_SEND_MODE_ENUM>(
-              value: _SEND_MODE_ENUM.HEX,
-              groupValue: mode,
-              onChanged: (value) {
-                setState(() {
-                  mode = value;
-                });
-              },
-            ),
-          ),
-        ),
-        Flexible(
-          child: ListTile(
-            title: const Text('Text'),
-            leading: Radio<_SEND_MODE_ENUM>(
-              value: _SEND_MODE_ENUM.ASCII_TEXT,
-              groupValue: mode,
-              onChanged: (value) {
-                setState(() {
-                  mode = value;
-                });
-              },
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -175,7 +124,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     return Expanded(
       child: DropdownButton(
         isExpanded: true,
-        items: scannedDevicesAsDropdown(),
+        items: scannedDevicesAsDDItems(),
         value: selectedDevice,
         hint: Text('select an XBee device'),
         onChanged: selectDevice,
@@ -183,24 +132,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     );
   }
 
-  ElevatedButton scanBtn() {
-    return ElevatedButton(
-      onPressed: (scanInProgress) ? null : scanForDevices,
-      child: Icon(Icons.find_replace),
-    );
-  }
-
-  Widget servicesDropdown() {
-    return DropdownButton(
-      isExpanded: true,
-      value: selectedService,
-      items: discCharsAsDropdown(),
-      hint: Text('discovered services'),
-      onChanged: selectServ,
-    );
-  }
-
-  List<DropdownMenuItem<BluetoothDevice>> scannedDevicesAsDropdown() {
+  List<DropdownMenuItem<BluetoothDevice>> scannedDevicesAsDDItems() {
     return List.generate(
       scannedDevices.length,
       (i) => DropdownMenuItem(
@@ -210,55 +142,10 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     );
   }
 
-  List<DropdownMenuItem<BluetoothService>> discCharsAsDropdown() {
-    return List.generate(
-      discoveredServices.length,
-      (i) => DropdownMenuItem(
-        child: Text('service ${discoveredServices[i].uuid}'),
-        value: discoveredServices[i],
-      ),
-    );
-  }
-
-  Widget consoleSection() {
-    return Container(
-      margin: EdgeInsets.only(top: 10),
-      padding: EdgeInsets.all(5),
-      constraints: BoxConstraints.expand(height: 200),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey, width: 2),
-      ),
-      child: SingleChildScrollView(
-        controller: sc,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: incomingData
-              .map((item) => Container(
-                  child: Text(item), padding: EdgeInsets.only(top: 5)))
-              .toList(),
-        ),
-      ),
-    );
-  }
-
-  Widget writeSection() {
-    return Flex(
-      direction: Axis.horizontal,
-      children: [
-        Expanded(
-          child: TextField(
-            controller: writeTC,
-            decoration:
-                InputDecoration(hintText: 'ex: $_sampleInput (relay "hi")'),
-          ),
-        ),
-        SizedBox(width: 10),
-        ElevatedButton(
-          child: Icon(Icons.send),
-          onPressed: (unlocked) ? sendEncrypted : null,
-        ),
-      ],
+  ElevatedButton scanBtn() {
+    return ElevatedButton(
+      onPressed: (scanInProgress) ? null : scanForDevices,
+      child: Icon(Icons.find_replace),
     );
   }
 
@@ -287,57 +174,59 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     );
   }
 
-  // void sendEncrypted() {
-  //   final defaultIn = (mode == _SEND_MODE_ENUM.HEX) ? _sampleInput : 'hi';
-  //   var toEncrypt = (writeTC.text.isNotEmpty) ? writeTC.text : defaultIn;
-
-  //   if (mode == _SEND_MODE_ENUM.ASCII_TEXT) {
-  //     toEncrypt = '2D0001' +
-  //         hex.encode(utf8.encode(
-  //             toEncrypt)); // data input 0x2d, frame id 0x00, interface 0x02
-  //   }
-
-  //   try {
-  //     final decoded = hex.decode(toEncrypt);
-  //     logData('raw: $decoded', type: 'out');
-
-  //     final encrypted = encryptAES(decoded);
-  //     sendToWriteTarget(encrypted);
-  //   } on FormatException catch (fe) {
-  //     if (mode == _SEND_MODE_ENUM.HEX)
-  //       logData('content must be in hex, even length, no spaces... $fe',
-  //           type: 'error');
-  //     return;
-  //   } catch (e) {
-  //     logData('error when sending: $e', type: 'error');
-  //     return;
-  //   }
-  // }
-
-  void sendEncrypted() {
-    List<int> toEncrypt = [];
-    try {
-      toEncrypt =
-          hex.decode((writeTC.text.isEmpty) ? _sampleInput : writeTC.text);
-      toEncrypt = [
-        126, // 0x7e
-        ...lengthInts(toEncrypt),
-        ...toEncrypt,
-        getChecksumInt(toEncrypt),
-      ];
-      logData('raw outgoing: $toEncrypt');
-      sendToWriteTarget(xbe.encrypt(toEncrypt));
-    } on FormatException catch (fe) {
-      logData('ensure content is hex, even length, no spaces. $fe',
-          type: 'error');
-      return;
-    } catch (e) {
-      logData('error in sending encrypted content. $e', type: 'error');
-    }
+  Widget consoleSection() {
+    return Container(
+      margin: EdgeInsets.only(top: 10),
+      padding: EdgeInsets.all(5),
+      constraints: BoxConstraints.expand(height: 250),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey, width: 2),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: incomingData
+              .map((item) => Container(
+                  child: Text(item), padding: EdgeInsets.only(top: 5)))
+              .toList(),
+        ),
+      ),
+    );
   }
 
-  void sendEncrypted2() {
-    sendToWriteTarget(xbe.encrypt2());
+  Widget writeSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Flex(
+          direction: Axis.horizontal,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: writeTC,
+                decoration: InputDecoration(
+                    hintText: 'ex. $_sampleInput ("hi" to micropython)'),
+              ),
+            ),
+            SizedBox(width: 10),
+            ElevatedButton(
+              child: Icon(Icons.send),
+              onPressed: (unlocked) ? sendEncrypted : null,
+            ),
+          ],
+        ),
+        SizedBox(height: 5),
+        Text(
+          _payloadTiptext,
+          style: TextStyle(fontStyle: FontStyle.italic),
+        ),
+        Text(
+          'To relay text wrap in double quotes (" ").',
+          style: TextStyle(fontStyle: FontStyle.italic),
+        ),
+      ],
+    );
   }
 
   Future<void> xbeeUnlock() async {
@@ -352,17 +241,53 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       return;
     }
 
-    // step 2: server presents salt and B (need to wait)
-    await Future.delayed(Duration(seconds: 1));
-    processStep2();
+    try {
+      // step 2: server presents salt and B (need to wait)
+      await Future.delayed(Duration(seconds: 1));
+      processStep2();
 
-    // step 3:  client sends proof M1 to server
-    sendStep3();
+      // step 3:  client sends proof M1 to server
+      sendStep3();
 
-    // step 4: server sends M2 and nonces to client.
-    // client must verify session
-    await Future.delayed(Duration(seconds: 1));
-    processStep4();
+      // step 4: server sends M2 and nonces to client.
+      // client must verify session
+      await Future.delayed(Duration(seconds: 1));
+      processStep4();
+    } catch (e) {
+      logData('error in unlock process: $e', type: 'error');
+      return;
+    }
+  }
+
+  void sendEncrypted() {
+    List<int> toEncrypt = [];
+    try {
+      var field = writeTC.text;
+      // if surrounded by double quotes, prepend relay frame structure
+      if (field.isNotEmpty &&
+          field[0] == '"' &&
+          field[field.length - 1] == '"') {
+        // encode it in hex
+        final msg = field.codeUnits.sublist(1, field.length - 1);
+        print(msg);
+        field = '2d6902' + hex.encode(msg);
+      }
+      toEncrypt = hex.decode((field.isEmpty) ? _sampleInput : field);
+      toEncrypt = [
+        126, // 0x7e
+        ...h.lengthInts(toEncrypt),
+        ...toEncrypt,
+        h.getChecksumInt(toEncrypt),
+      ];
+      logData('raw outgoing: $toEncrypt');
+      sendToWriteTarget(xbe.encrypt(toEncrypt));
+    } on FormatException catch (fe) {
+      logData('ensure content is hex, even length, no spaces. $fe',
+          type: 'error');
+      return;
+    } catch (e) {
+      logData('error in sending encrypted content. $e', type: 'error');
+    }
   }
 
   void sendStep1() {
@@ -396,18 +321,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       return;
     }
 
-    // create the aes algo and encrypter
-    // createAES();
+    // create the encrypter
     xbe = XBeeEncrypter(xba.sesh.key, xba.txNonce, xba.rxNonce);
-  }
-
-  void createAES() {
-    final aes = x.AES(
-      x.Key.fromBase16(xba.sesh.key),
-      mode: x.AESMode.ctr,
-      padding: null,
-    );
-    encrypter = x.Encrypter(aes);
   }
 
   void sendToWriteTarget(List<int> send) {
@@ -421,10 +336,12 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     });
 
     // connect device to flutter_blue instance (async)
-    connectAndDiscover();
+    connectAndDiscover().then((_) {
+      logData('finished connection.');
+    });
   }
 
-  void connectAndDiscover() async {
+  Future<void> connectAndDiscover() async {
     logData('attempting connection with ${selectedDevice.name}');
     bt.connectToDevice(selectedDevice).then((success) async {
       if (!success) {
@@ -434,7 +351,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         return;
       } else {
         // discover services then characteristics
-        discoveredServices = await bt.discoverCharacteristics(selectedDevice);
+        final discoveredServices =
+            await bt.discoverCharacteristics(selectedDevice);
         logData('searching for XBee API service...');
 
         // see if this has the xbee ble api service
@@ -487,14 +405,6 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     });
   }
 
-  void selectServ(BluetoothService bts) {
-    setState(() {
-      selectedService = bts;
-    });
-
-    handleSelectedServ();
-  }
-
   void scanForDevices() async {
     logData('scanning...');
     // reset scan results and disable button
@@ -503,9 +413,19 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       scanInProgress = true;
     });
 
-    // use flutter_blue to scan, then create dropdown items
-    scannedDevices = await bt.scanForDevices();
+    try {
+      // use flutter_blue to scan, then create dropdown items
+      scannedDevices = await bt.scanForDevices();
+    } catch (e) {
+      logData('check if bluetooth and location are on! error: $e',
+          type: 'error');
+      setState(() {
+        scanInProgress = false;
+      });
+      return;
+    }
 
+    logData('finished scanning.');
     // enable scan button
     setState(() {
       scanInProgress = false;
@@ -518,13 +438,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         logData('subscribing to updates from ${char.uuid}');
         responseSub?.cancel();
         responseSub = char.value.listen(
-          (val) {
-            latestResponse = val;
-            logData('raw incoming: $val', type: 'in');
-            if (unlocked) {
-              logData('decrypted: ${decrypt(val)}');
-            }
-          },
+          responseCallback,
           cancelOnError: true,
         );
         char.setNotifyValue(true);
@@ -537,12 +451,26 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     });
   }
 
-  static const _LOG_EMOJIS = {
-    'in': '📲',
-    'out': '📤',
-    'error': '❌',
-    'info': 'ℹ️'
-  };
+  void responseCallback(List<int> val) {
+    latestResponse = val;
+    logData('raw incoming: $val', type: 'in');
+    if (unlocked) {
+      final decrypted = decrypt(val);
+      logData('decrypted: $decrypted');
+
+      if (decrypted.length > 4 && decrypted[3] == 173) {
+        //173 = 0xAD = user data
+        try {
+          logData(
+              'user data: ${utf8.decode(decrypted.sublist(5, decrypted.length - 1))}');
+        } catch (e) {
+          logData('had trouble decoding user data. $e', type: 'error');
+        }
+      }
+    }
+  }
+
+  final _LOG_EMOJIS = {'in': '📲', 'out': '📤', 'error': '❌', 'info': 'ℹ️'};
   void logData(String item, {String type}) {
     if (incomingData.length >= 25) {
       incomingData.removeLast();
@@ -552,83 +480,13 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
     print(msg);
     setState(() {
-      incomingData.insert(0, '${getNowTime()} - $msg');
+      incomingData.insert(0, '${h.getNowTime()} - $msg');
     });
-  }
-
-  String getNowTime() {
-    return '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}';
   }
 
   List<int> decrypt(List<int> val) {
     // TODO: differentiate return by utf8 or just bytes
     return xbe.decrypt(val);
-  }
-
-  List<int> encryptAES(List<int> bytes) {
-    // // pad data
-    // final paddedBytes = padWithNulls(bytes);
-
-    // // add frames
-    // List<int> toEncrypt = [
-    //   126, // 0x7e
-    //   ...lengthInts(paddedBytes),
-    //   ...paddedBytes,
-    //   getChecksumInt(paddedBytes),
-    // ];
-
-    // // create initialization vector
-    // final ivhex = '${xba.txNonce}${getCounterHexString(outgoingCtr)}';
-    // final ivee = x.IV.fromBase16(ivhex);
-    // print('iv: ${ivee.base16}');
-
-    // // encrypt
-    // final encrypted = encrypter.encryptBytes(toEncrypt, iv: ivee);
-    // print('encrypted [length ${encrypted.bytes.length}]: ${encrypted.bytes}');
-
-    // // increment the counter by how many blocks
-    // outgoingCtr += encrypted.bytes.length ~/ 16;
-    // return encrypted.bytes;
-
-    // add frames
-    List<int> toEncrypt = [
-      126, // 0x7e
-      ...lengthInts(bytes),
-      ...bytes,
-      getChecksumInt(bytes),
-    ];
-
-    return xbe.encrypt(toEncrypt);
-  }
-
-  List<int> encrypt() {
-    return xbe.encrypt2();
-  }
-
-  List<int> lengthInts(List<int> data) {
-    // return 2 bytes representing length of the data
-    return hex.decode(hex.encode([data.length]).padLeft(4, '0'));
-  }
-
-  int getChecksumInt(List<int> data) {
-    final intsum = xba.listSum(data);
-    final hexsum = intsum.toRadixString(16);
-
-    // truncate and subtract from 0xFF (255 in decimal)
-    final last2Digits = hexsum.substring(hexsum.length - 2, hexsum.length);
-    return 255 - int.parse(last2Digits, radix: 16);
-  }
-
-  List<int> padWithNulls(List<int> original) {
-    var newlist = List<int>.from(original);
-    while ((newlist.length + 4) % 16 != 0) {
-      newlist.add(0);
-    }
-    return newlist;
-  }
-
-  String getCounterHexString(int ctr) {
-    return ctr.toRadixString(16).padLeft(8, '0');
   }
 
   void resetState() {
@@ -639,7 +497,6 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
       connectionSub?.cancel();
       writeTarget = null;
       selectedService = null;
-      discoveredServices.clear();
       selectedDevice = null;
       scannedDevices.clear();
       scannedDevicesDDItems.clear();
@@ -647,12 +504,9 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   }
 
   void resetAuth() {
-    xba = new XBeeAuth('Fathom');
+    xba = null;
     xbe = null;
     unlocked = false;
-    encrypter = null;
-    incomingCtr = 1;
-    outgoingCtr = 1;
   }
 
   void disconnectAndClear() {
@@ -664,7 +518,6 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
     resetAuth();
     selectedService = null;
-    discoveredServices.clear();
     setState(() {
       selectedDevice = null;
     });
@@ -677,8 +530,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
   @override
   void dispose() {
+    disconnectAndClear();
     super.dispose();
   }
 }
-
-enum _SEND_MODE_ENUM { ASCII_TEXT, HEX }

@@ -27,12 +27,20 @@ Future<List<BluetoothDevice>> scanForDevices() async {
   return scannedDevices;
 }
 
+Future<void> disconnectFromAllDevices() async {
+  final connectedDevices = await fb.connectedDevices;
+  for (final d in connectedDevices) {
+    d.disconnect();
+  }
+}
+
 Future<bool> connectToDevice(BluetoothDevice btd) async {
   // get list of connected devices, to check whether already connected
   final connectedDevices = await fb.connectedDevices;
 
   if (connectedDevices.contains(btd)) {
     print('already connected to ${btd.name}');
+    return true;
   } else {
     print('attempting connection with ${btd.name}');
     try {
@@ -59,8 +67,13 @@ Future<List<BluetoothService>> discoverCharacteristics(
   // }
 
   // return btcs;
-
+  final connectedDevices = await fb.connectedDevices;
+  if (connectedDevices.contains(btd)) {
   return await btd.discoverServices();
+
+  } else {
+    throw Exception('attempted to discover services on a non-connected device.');
+  }
 }
 
 String getFirstProperty(BluetoothCharacteristic c) {
