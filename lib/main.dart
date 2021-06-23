@@ -249,7 +249,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         Expanded(
           child: TextField(
             controller: writeTC,
-            decoration: InputDecoration(hintText: 'ex: $_sampleInput (relay "hi")'),
+            decoration:
+                InputDecoration(hintText: 'ex: $_sampleInput (relay "hi")'),
           ),
         ),
         SizedBox(width: 10),
@@ -314,14 +315,25 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   // }
 
   void sendEncrypted() {
-    var toEncrypt = hex.decode(_sampleInput);
-    toEncrypt = [
-      126,
-      ...lengthInts(toEncrypt),
-      ...toEncrypt,
-      getChecksumInt(toEncrypt),
-    ];
-    sendToWriteTarget(xbe.encrypt(toEncrypt));
+    List<int> toEncrypt = [];
+    try {
+      toEncrypt =
+          hex.decode((writeTC.text.isEmpty) ? _sampleInput : writeTC.text);
+      toEncrypt = [
+        126, // 0x7e
+        ...lengthInts(toEncrypt),
+        ...toEncrypt,
+        getChecksumInt(toEncrypt),
+      ];
+      logData('raw outgoing: $toEncrypt');
+      sendToWriteTarget(xbe.encrypt(toEncrypt));
+    } on FormatException catch (fe) {
+      logData('ensure content is hex, even length, no spaces. $fe',
+          type: 'error');
+      return;
+    } catch (e) {
+      logData('error in sending encrypted content. $e', type: 'error');
+    }
   }
 
   void sendEncrypted2() {
