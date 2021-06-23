@@ -314,28 +314,18 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
   // }
 
   void sendEncrypted() {
-    List<int> decodedBytes;
-    // convert hex string to bytes
-    try {
-      decodedBytes =
-          hex.decode((writeTC.text.isEmpty) ? _sampleInput : writeTC.text);
-      // add frames
-      decodedBytes = [
-        126,
-        ...lengthInts(decodedBytes),
-        ...decodedBytes,
-        getChecksumInt(decodedBytes),
-      ];
-    } on FormatException catch (fe) {
-      logData('content must be in hex, even length, no spaces. $fe',
-          type: 'error');
-      return;
-    } catch (e) {
-      logData('error in constructing frame... $e', type: 'error');
-      return;
-    }
-    // sendToWriteTarget(encrypt(decodedBytes));
-    sendToWriteTarget(decodedBytes);
+    var toEncrypt = hex.decode(_sampleInput);
+    toEncrypt = [
+      126,
+      ...lengthInts(toEncrypt),
+      ...toEncrypt,
+      getChecksumInt(toEncrypt),
+    ];
+    sendToWriteTarget(xbe.encrypt(toEncrypt));
+  }
+
+  void sendEncrypted2() {
+    sendToWriteTarget(xbe.encrypt2());
   }
 
   Future<void> xbeeUnlock() async {
@@ -599,9 +589,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     return xbe.encrypt(toEncrypt);
   }
 
-  List<int> encrypt(List<int> input) {
-    logData('raw outgoing: $input');
-    return xbe.encrypt(input);
+  List<int> encrypt() {
+    return xbe.encrypt2();
   }
 
   List<int> lengthInts(List<int> data) {

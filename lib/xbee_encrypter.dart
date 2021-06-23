@@ -26,6 +26,72 @@ class XBeeEncrypter {
     );
   }
 
+  List<int> encrypt2() {
+    var toEncrypt = '2D00026869';
+    // var toEncrypt = '08175450';
+    final decoded = hex.decode(toEncrypt);
+
+    final encrypted = encrypt2helper(decoded);
+    return encrypted;
+  }
+
+  List<int> encrypt2helper(List<int> bytes) {
+    // pad data
+    // final paddedBytes = padWithNulls(bytes);
+    final paddedBytes = bytes;
+
+    // add frames
+    List<int> toEncrypt = [
+      126, // 0x7e
+      ...lengthInts(paddedBytes),
+      ...paddedBytes,
+      getChecksumInt(paddedBytes),
+    ];
+
+    // create initialization vector
+    final ivhex = '$txNonce${getCounterHex(txCtr)}';
+    final ivee = x.IV.fromBase16(ivhex);
+    print('iv: ${ivee.base16}');
+
+    // encrypt
+    final encrypted = xbe.encryptBytes(toEncrypt, iv: ivee);
+    print('encrypted [length ${encrypted.bytes.length}]: ${encrypted.bytes}');
+
+    // increment the counter by how many blocks
+    txCtr += encrypted.bytes.length ~/ 16;
+    return encrypted.bytes;
+  }
+
+  List<int> padWithNulls(List<int> original) {
+    var newlist = List<int>.from(original);
+    while ((newlist.length + 4) % 16 != 0) {
+      newlist.add(0);
+    }
+    return newlist;
+  }
+
+  List<int> lengthInts(List<int> data) {
+    // return 2 bytes representing length of the data
+    return hex.decode(hex.encode([data.length]).padLeft(4, '0'));
+  }
+
+  int getChecksumInt(List<int> data) {
+    final intsum = listSum(data);
+    final hexsum = intsum.toRadixString(16);
+
+    // truncate and subtract from 0xFF (255 in decimal)
+    final last2Digits = hexsum.substring(hexsum.length - 2, hexsum.length);
+    return 255 - int.parse(last2Digits, radix: 16);
+  }
+
+  int listSum(List<int> ints) {
+    int sum = 0;
+    ints.forEach((element) {
+      sum += element;
+    });
+    return sum;
+  }
+
   /// Encrypts a byte stream.
   List<int> encrypt(List<int> plaintext) {
     // offset the plaintext message
@@ -36,10 +102,10 @@ class XBeeEncrypter {
     var encrypted = xbe
         .encryptBytes(
           offsetPlaintext,
-          iv: x.IV.fromBase16(rxNonce + getCounterHex(rxCtr)),
+          iv: x.IV.fromBase16(txNonce + getCounterHex(txCtr)),
         )
         .bytes;
-   
+
     // adjust the counters
     adjustCounters(Mode.ENCRYPTING, plaintext.length);
 
@@ -65,7 +131,7 @@ class XBeeEncrypter {
       x.Encrypted.fromBase16(hex.encode(offsetEncrypted)),
       iv: x.IV.fromBase16(rxNonce + getCounterHex(rxCtr)),
     );
-    
+
     // adjust the counters
     adjustCounters(Mode.DECRYPTING, encrypted.length);
 
@@ -86,7 +152,7 @@ class XBeeEncrypter {
   }
 
   /// Adds an offset to the input.
-  /// 
+  ///
   /// This is so that the input matches up with the IV.
   List<int> offset(int numBytes, List<int> input) {
     if (numBytes == 0) return input;
