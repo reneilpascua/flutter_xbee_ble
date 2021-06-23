@@ -70,7 +70,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
   final _payloadTiptext =
       'Content will be wrapped with 7E:LL:LL: ... :CS, then encrypted. Check XBee documentation for more info.';
-  final _sampleInput = '2D3D0252656C6179'; // "relay"
+  final _sampleInput = '2D00026869'; // "hi"
 
   @override
   void initState() {
@@ -249,7 +249,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
         Expanded(
           child: TextField(
             controller: writeTC,
-            decoration: InputDecoration(hintText: 'ex: $_sampleInput ("relay")'),
+            decoration: InputDecoration(hintText: 'ex: $_sampleInput (relay "hi")'),
           ),
         ),
         SizedBox(width: 10),
