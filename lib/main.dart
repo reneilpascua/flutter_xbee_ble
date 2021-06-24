@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:convert/convert.dart';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_blue/flutter_blue.dart';
-import 'package:xbee_test/xbee_encrypter.dart';
+
+import 'xbee_encrypter.dart';
 import 'bt_logic.dart' as bt;
 import 'xbee_auth.dart';
 import 'helpers.dart' as h;
@@ -17,11 +17,11 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'XBee BLE Test',
+      title: 'XBee BLE Relay',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: XBeeRelayConsolePage(title: 'XBee BLE Test'),
+      home: XBeeRelayConsolePage(title: 'XBee BLE Relay'),
     );
   }
 }
@@ -60,7 +60,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
 
   final _payloadTiptext =
       'Write a hex command. It will be wrapped with 7E:LL:LL:...:CS. Check XBee documentation for more info.';
-  final _sampleInput = '2D00026869'; // "hi"
+  final _sampleInput = '2D69026869'; // "hi"
 
   @override
   void initState() {

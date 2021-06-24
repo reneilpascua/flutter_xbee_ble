@@ -1,4 +1,4 @@
-# xbee_test
+# XBee BLE Relay
 
 A new Flutter project.
 

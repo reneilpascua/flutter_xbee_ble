@@ -1,7 +1,6 @@
 import 'package:encrypt/encrypt.dart' as x;
 import 'dart:convert' show utf8;
 import 'package:convert/convert.dart' show hex;
-import 'package:meta/meta.dart';
 
 /// An encapsulation of the cryptography required to interface with XBee.
 ///

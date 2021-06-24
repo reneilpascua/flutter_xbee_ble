@@ -1,5 +1,4 @@
 import 'package:flutter_blue/flutter_blue.dart';
-import 'package:srp/client.dart';
 
 final FlutterBlue fb = FlutterBlue.instance;
 
@@ -59,14 +58,6 @@ Future<bool> connectToDevice(BluetoothDevice btd) async {
 
 Future<List<BluetoothService>> discoverCharacteristics(
     BluetoothDevice btd) async {
-  List<BluetoothCharacteristic> btcs = [];
-  // final services = await btd.discoverServices();
-
-  // for (final service in services) {
-  //   btcs.addAll(service.characteristics);
-  // }
-
-  // return btcs;
   final connectedDevices = await fb.connectedDevices;
   if (connectedDevices.contains(btd)) {
   return await btd.discoverServices();
