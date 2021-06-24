@@ -336,9 +336,7 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
     });
 
     // connect device to flutter_blue instance (async)
-    connectAndDiscover().then((_) {
-      logData('finished connection.');
-    });
+    connectAndDiscover();
   }
 
   Future<void> connectAndDiscover() async {
@@ -395,6 +393,8 @@ class _XBeeRelayConsolePageState extends State<XBeeRelayConsolePage> {
             disconnectAndClear();
           }
         });
+
+        logData('connected.');
 
         selectedService = theOne;
         handleSelectedServ();
