@@ -157,37 +157,3 @@ const ERRORS_IN_STEP_FRAME = {
 
 const STEP1_LENGTH = '0082'; // 130 in base 10 (unit: Bytes)
 const STEP3_LENGTH = '0022'; // 34 in base 10 (unit: Bytes)
-
-void main0() {
-  final plainText = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit';
-  final key = Key.fromUtf8('my 32 length key................');
-  final iv = IV.fromLength(16);
-
-  final encrypter = Encrypter(AES(key));
-
-  final encrypted = encrypter.encrypt(plainText, iv: iv);
-  final decrypted = encrypter.decrypt(encrypted, iv: iv);
-  final decrypted2 = encrypter.decrypt(encrypted, iv: iv);
-
-
-  print(decrypted); // Lorem ipsum dolor sit amet, consectetur adipiscing elit
-  print(decrypted2);
-  print(encrypted.base64); // R4PxiU3h8YoIRqVowBXm36ZcCeNeZ4s1OvVBTfFlZRdmohQqOpPQqD1YecJeZMAop/hZ4OxqgC1WtwvX/hP9mw==
-}
-
-void main1() {
-  final plainText = 'helloworld';
-  final key = Key.fromUtf8('my 32 length key................');
-  var iv = IV.fromBase16('0001');
-
-  final encrypter = Encrypter(AES(key));
-
-  final encrypted = encrypter.encrypt(plainText, iv: iv);
-  print(encrypted.base16);
-
-  final decrypted = encrypter.decrypt(encrypted, iv: iv);
-  print(decrypted);
-
-  final decrypted2 = encrypter.decrypt(encrypted, iv: IV.fromBase16('000b'));
-  print(decrypted2);
-}
